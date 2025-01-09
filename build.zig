@@ -81,4 +81,30 @@ pub fn build(b: *std.Build) !void {
             }).step,
         );
     }
+
+    const api_step = b.step("api", "Generate Orca bindings (modifes source tree!)");
+    {
+        const gen_api = b.addExecutable(.{
+            .name = "gen-api",
+            .root_source_file = b.path("scripts/gen_api.zig"),
+            .target = b.host,
+            .optimize = .Debug,
+        });
+
+        const run_gen = b.addRunArtifact(gen_api);
+        if (b.option([]const u8, "api-path", "Provide a custom api.json") orelse null) |api_path| {
+            run_gen.addFileArg(.{ .cwd_relative = api_path });
+        } else {
+            run_gen.addFileArg(b.path("scripts/api.json")); // TODO should this file be included in the repo?
+        }
+        const gen_output = run_gen.addOutputFileArg("out.zig"); // TODO temporary path
+
+        const copy_output = b.addWriteFiles();
+        copy_output.addCopyFileToSource(gen_output, "out.zig");
+
+        // api_step.dependOn(&copy_output.step);
+        const fmt = b.addFmt(.{ .paths = &.{"out.zig"} });
+        fmt.step.dependOn(&copy_output.step);
+        api_step.dependOn(&fmt.step);
+    }
 }
