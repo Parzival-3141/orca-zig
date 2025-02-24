@@ -12,6 +12,7 @@ const assert = std.debug.assert;
 // - remove unnamed enums, create a dedicated "constant" kind instead
 // - make OC_UI_STYLE a proper enum
 // - oc_pool and oc_window are missing typename entries
+// - oc_ui_box is duplicated
 // - flag enum types should be differentiated from normal enums
 // - flag enum types should use the correct backing values (i.e. oc_file_open_flags_enum should use u16 not u32)
 
@@ -201,7 +202,7 @@ fn handleProc(proc: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteE
             assert(expectKind(_type.object) == .@"variadic-param");
             try writer.writeAll("...,");
         } else {
-            try writer.print("{s}: ", .{name.string});
+            try writer.print("{s}: ", .{fmtNameAliasingKeyword(name.string)});
             try handleType(_type.object, writer, 1 + depth);
             try writer.writeByte(',');
         }
@@ -235,7 +236,7 @@ fn handleTypename(typename: json.ObjectMap, writer: std.io.AnyWriter, depth: u32
 
     if (try Quirks.handleTypename(name.string, _type.object, writer, depth)) return;
 
-    try writer.print("pub const {s} = ", .{name.string});
+    try writer.print("pub const {s} = ", .{fmtNameAliasingKeyword(name.string)});
     try handleType(_type.object, writer, depth);
     try writer.writeByte(';');
 }
@@ -256,7 +257,7 @@ fn handleUnnamedEnum(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32
         if (i > 0) try writer.writeByteNTimes(' ', depth * 4);
         try writer.print(
             "pub const {s}: {s} = {d};",
-            .{ const_name.string, tag_type.string, const_value.integer },
+            .{ fmtNameAliasingKeyword(const_name.string), tag_type.string, const_value.integer },
         );
         if (i < constants.array.items.len - 1) try writer.writeByte('\n');
     }
@@ -296,7 +297,7 @@ fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Write
                 }
                 try writer.print(
                     "{s} = {d},\n",
-                    .{ const_name.string, const_value.integer },
+                    .{ fmtNameAliasingKeyword(const_name.string), const_value.integer },
                 );
             }
             if (constants.array.items.len > 0)
@@ -350,9 +351,7 @@ fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Write
                     try writer.print("unnamed_{d}: ", .{unnamed});
                     unnamed += 1;
                 } else {
-                    // Using identifier literals here to handle fields that alias keywords (error, align, etc.)
-                    // Redundant cases will be removed when the builder runs the output through 'zig fmt'.
-                    try writer.print("@\"{s}\": ", .{field_name.string});
+                    try writer.print("{s}: ", .{fmtNameAliasingKeyword(field_name.string)});
                 }
                 try handleType(field_type.object, writer, 1 + depth);
                 try writer.writeAll(",\n");
@@ -410,17 +409,17 @@ fn expectField(object: json.ObjectMap, comptime name: []const u8) json.Value {
 }
 
 fn expectKind(object: json.ObjectMap) Kind {
-    const kind = expectField(object, "kind");
-
+    // this map is generated once at compile-time
     const map: std.StaticStringMap(Kind) = comptime blk: {
-        const K = @typeInfo(Kind);
-        var kvs: [K.Enum.fields.len]struct { []const u8, Kind } = undefined;
-        for (K.Enum.fields, 0..) |field, i| {
+        const K = @typeInfo(Kind).Enum;
+        var kvs: [K.fields.len]struct { []const u8, Kind } = undefined;
+        for (K.fields, 0..) |field, i| {
             kvs[i] = .{ field.name, @as(Kind, @enumFromInt(field.value)) };
         }
         break :blk std.StaticStringMap(Kind).initComptime(kvs);
     };
 
+    const kind = expectField(object, "kind");
     return map.get(kind.string) orelse std.debug.panic("Unknown Kind type '{s}'", .{kind.string});
 }
 
@@ -436,6 +435,17 @@ fn handleDocComment(doc: json.Value, writer: std.io.AnyWriter, depth: u32) Write
         },
         else => unreachable,
     };
+}
+
+/// If the name aliases a Zig keyword, returns the name formatted as an identifier
+/// literal backed by static memory, else returns name as is. Intended to be used
+/// *ONCE* per print call.
+fn fmtNameAliasingKeyword(name: []const u8) []const u8 {
+    if (std.zig.Token.keywords.get(name) == null) return name;
+    const Static = struct {
+        var buf: [16]u8 = undefined;
+    };
+    return std.fmt.bufPrint(&Static.buf, "@\"{s}\"", .{name}) catch unreachable;
 }
 
 /// Intended to be used inside main
@@ -467,6 +477,7 @@ const Quirks = struct {
         }
     }
 
+    /// Returns true if the typename should be skipped.
     fn handleTypename(
         name: []const u8,
         _type: json.ObjectMap,
@@ -513,6 +524,11 @@ const Quirks = struct {
             try writer.writeByte(';');
 
             return true;
+        }
+
+        if (strEql(name, "oc_ui_box")) {
+            assert(expectKind(_type) == .@"struct");
+            return _type.get("fields") == null;
         }
 
         return false;
