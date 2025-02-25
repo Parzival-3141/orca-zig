@@ -187,7 +187,9 @@ fn handleProc(proc: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!vo
         if (proc.get("doc")) |doc| {
             try handleDocComment(doc, writer, depth);
         }
-        try writer.print("pub extern fn {s}(", .{fmtDeclName(name.string)});
+        try writer.print("pub const {s} = {s};\n", .{ fmtDeclName(name.string), name.string });
+        try writer.writeByteNTimes(' ', depth * 4);
+        try writer.print("extern fn {s}(", .{name.string});
     } else {
         try writer.writeAll("*const fn (");
     }
