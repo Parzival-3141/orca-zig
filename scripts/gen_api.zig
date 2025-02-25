@@ -3,8 +3,9 @@
 const std = @import("std");
 const json = std.json;
 const assert = std.debug.assert;
+const AnyWriter = std.io.AnyWriter;
 
-// api.json wishlist:
+// api.json wishlist (in order of importance):
 // - format documentation
 // - format and api versioning!!!
 // - specify pointer types (single/multi-item, nullable, mutable, etc...)
@@ -13,6 +14,7 @@ const assert = std.debug.assert;
 // - make OC_UI_STYLE a proper enum
 // - oc_pool and oc_window are missing typename entries
 // - oc_ui_box is duplicated
+// - OC_OC_IO_ERROR typo?
 // - flag enum types should be differentiated from normal enums
 // - flag enum types should use the correct backing values (i.e. oc_file_open_flags_enum should use u16 not u32)
 
@@ -60,11 +62,11 @@ pub fn main() !u8 {
 
     const api_src = try std.fs.cwd().readFileAlloc(allocator, api_path, 1024 * 1024);
 
-    var diag: std.json.Diagnostics = .{};
-    var scanner = std.json.Scanner.initCompleteInput(allocator, api_src);
+    var diag: json.Diagnostics = .{};
+    var scanner = json.Scanner.initCompleteInput(allocator, api_src);
     scanner.enableDiagnostics(&diag);
 
-    const api = std.json.parseFromTokenSourceLeaky(std.json.Value, allocator, &scanner, .{}) catch |err| {
+    const api = json.parseFromTokenSourceLeaky(json.Value, allocator, &scanner, .{}) catch |err| {
         const line_start = diag.line_start_cursor +% 1;
         const line_end = std.mem.indexOfScalarPos(u8, api_src, line_start, '\n') orelse api_src.len;
 
@@ -106,13 +108,15 @@ pub fn main() !u8 {
 
 const WriteError = anyerror;
 
-fn handleModule(module: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleModule(module: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     const name = expectField(module, "name");
     const brief = expectField(module, "brief");
 
     try writer.print(
-        \\// ==== {s} ====
-        \\// {s}
+        \\
+        \\//------------------------------------------------------------------------------------------
+        \\// [{s}] {s}
+        \\//------------------------------------------------------------------------------------------
         \\
         \\
     , .{ name.string, brief.string });
@@ -134,7 +138,7 @@ fn handleModule(module: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Wr
 }
 
 /// Emit modules as namespace structs
-fn handleModuleNamespaced(module: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleModuleNamespaced(module: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     const name = expectField(module, "name");
     const brief = expectField(module, "brief");
 
@@ -160,18 +164,18 @@ fn handleModuleNamespaced(module: json.ObjectMap, writer: std.io.AnyWriter, dept
     try writer.writeAll("};\n");
 }
 
-fn handleMacro(macro: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleMacro(macro: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     if (macro.get("doc")) |doc| {
         try handleDocComment(doc, writer, depth);
     }
     const name = expectField(macro, "name");
     try writer.print(
         "pub const {s} = @compileError(\"TODO: translate macro\");",
-        .{name.string},
+        .{name.string}, // not formatting these names so they're easier to grep when we eventually handle macros
     );
 }
 
-fn handleProc(proc: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleProc(proc: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     // [doc-comment]
     // (pub extern)|*const fn [name](([doc-comment] param: type,)*) callconv(.C) type;
 
@@ -183,7 +187,7 @@ fn handleProc(proc: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteE
         if (proc.get("doc")) |doc| {
             try handleDocComment(doc, writer, depth);
         }
-        try writer.print("pub extern fn {s}(", .{name.string});
+        try writer.print("pub extern fn {s}(", .{fmtDeclName(name.string)});
     } else {
         try writer.writeAll("*const fn (");
     }
@@ -218,12 +222,12 @@ fn handleProc(proc: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteE
     if (proc_name != null) try writer.writeByte(';');
 }
 
-fn handleTypename(typename: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleTypename(typename: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     const name = expectField(typename, "name");
     const _type = expectField(typename, "type");
 
     // TODO: some types can be handled better by manually defining them,
-    // such as the vector types. E.g. pub const oc_vec2 = [2]f32;
+    // such as flag types (file_open_flags) or anonymous unions/structs.
 
     if (name.string.len == 0) {
         assert(expectKind(_type.object) == .@"enum");
@@ -236,12 +240,12 @@ fn handleTypename(typename: json.ObjectMap, writer: std.io.AnyWriter, depth: u32
 
     if (try Quirks.handleTypename(name.string, _type.object, writer, depth)) return;
 
-    try writer.print("pub const {s} = ", .{fmtNameAliasingKeyword(name.string)});
+    try writer.print("pub const {s} = ", .{fmtDeclName(name.string)});
     try handleType(_type.object, writer, depth);
     try writer.writeByte(';');
 }
 
-fn handleUnnamedEnum(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleUnnamedEnum(_type: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     const tag_type = expectField(
         expectField(_type, "type").object,
         "kind",
@@ -257,13 +261,13 @@ fn handleUnnamedEnum(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32
         if (i > 0) try writer.writeByteNTimes(' ', depth * 4);
         try writer.print(
             "pub const {s}: {s} = {d};",
-            .{ fmtNameAliasingKeyword(const_name.string), tag_type.string, const_value.integer },
+            .{ fmtDeclName(const_name.string), tag_type.string, const_value.integer },
         );
         if (i < constants.array.items.len - 1) try writer.writeByte('\n');
     }
 }
 
-fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleType(_type: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!void {
     const kind = expectKind(_type);
     switch (kind) {
         .array => {
@@ -297,7 +301,7 @@ fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Write
                 }
                 try writer.print(
                     "{s} = {d},\n",
-                    .{ fmtNameAliasingKeyword(const_name.string), const_value.integer },
+                    .{ fmtDeclName(const_name.string), const_value.integer },
                 );
             }
             if (constants.array.items.len > 0)
@@ -374,7 +378,8 @@ fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Write
         => try writer.writeAll(@tagName(kind)),
         .char => try writer.writeAll("u8"),
         .size_t => try writer.writeAll("usize"),
-        .namedType => try writer.writeAll(expectField(_type, "name").string),
+
+        .namedType => try writer.writeAll(fmtDeclName(expectField(_type, "name").string)),
 
         .macro => unreachable,
         .@"variadic-param" => unreachable,
@@ -387,7 +392,7 @@ fn handleType(_type: json.ObjectMap, writer: std.io.AnyWriter, depth: u32) Write
     }
 }
 
-fn defaultHandler(value: json.ObjectMap, writer: std.io.AnyWriter, _: u32) WriteError!void {
+fn defaultHandler(value: json.ObjectMap, writer: AnyWriter, _: u32) WriteError!void {
     const stderr = std.io.getStdErr().writer().any();
 
     try writer.writeAll("TODO:");
@@ -423,7 +428,7 @@ fn expectKind(object: json.ObjectMap) Kind {
     return map.get(kind.string) orelse std.debug.panic("Unknown Kind type '{s}'", .{kind.string});
 }
 
-fn handleDocComment(doc: json.Value, writer: std.io.AnyWriter, depth: u32) WriteError!void {
+fn handleDocComment(doc: json.Value, writer: AnyWriter, depth: u32) WriteError!void {
     return switch (doc) {
         .string => |str| {
             try writer.print("/// {s}\n", .{str});
@@ -437,6 +442,12 @@ fn handleDocComment(doc: json.Value, writer: std.io.AnyWriter, depth: u32) Write
     };
 }
 
+/// Intended to be used *ONCE* per print call.
+fn fmtDeclName(name: []const u8) []const u8 {
+    const new_name = fmtNameAliasingKeyword(stripOrcaPrefix(name));
+    return new_name;
+}
+
 /// If the name aliases a Zig keyword, returns the name formatted as an identifier
 /// literal backed by static memory, else returns name as is. Intended to be used
 /// *ONCE* per print call.
@@ -446,6 +457,13 @@ fn fmtNameAliasingKeyword(name: []const u8) []const u8 {
         var buf: [16]u8 = undefined;
     };
     return std.fmt.bufPrint(&Static.buf, "@\"{s}\"", .{name}) catch unreachable;
+}
+
+fn stripOrcaPrefix(name: []const u8) []const u8 {
+    return if (name.len > 3 and (strEql(name[0..3], "oc_") or strEql(name[0..3], "OC_")))
+        name[3..]
+    else
+        name;
 }
 
 /// Intended to be used inside main
@@ -458,18 +476,21 @@ fn strEql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
+/// Handle oddities and idiosyncrasies in the api definitions.
 /// Code here is intentionally brittle to changes in api.json.
 const Quirks = struct {
-    fn handleModule(name: []const u8, writer: std.io.AnyWriter) WriteError!void {
+    fn handleModule(name: []const u8, writer: AnyWriter) WriteError!void {
         // These types aren't yet included in the api.json,
         // not sure why. -jdelsi Jan 8, 2025
         if (strEql(name, "Application")) {
-            try writer.writeAll("pub const oc_window = u64;\n");
+            // oc_window
+            try writer.writeAll("pub const window = u64;\n");
         } else if (strEql(name, "Memory")) {
+            // oc_pool
             try writer.writeAll(
-                \\pub const oc_pool = extern struct {
-                \\    arena: oc_arena,
-                \\    freeList: oc_list,
+                \\pub const pool = extern struct {
+                \\    arena: arena,
+                \\    freeList: list,
                 \\    blockSize: u64,
                 \\};
                 \\
@@ -481,33 +502,16 @@ const Quirks = struct {
     fn handleTypename(
         name: []const u8,
         _type: json.ObjectMap,
-        writer: std.io.AnyWriter,
+        writer: AnyWriter,
         depth: u32,
     ) WriteError!bool {
         if (std.mem.startsWith(u8, name, "oc_vec")) {
             assert(expectKind(_type) == .@"union");
-            const vec_array = expectField(_type, "fields").array.items[1].object;
-            assert(strEql(expectField(vec_array, "name").string, "c"));
+            const vec_struct = expectField(_type, "fields").array.items[0].object;
+            assert(strEql(expectField(vec_struct, "name").string, ""));
 
-            try writer.print("pub const {s} = ", .{name});
-            try handleType(expectField(vec_array, "type").object, writer, depth);
-            try writer.writeByte(';');
-
-            return true;
-        }
-
-        if (strEql(name, "oc_mat2x3")) {
-            assert(expectKind(_type) == .@"struct");
-            const m = expectField(_type, "fields").array.items[0].object;
-            assert(strEql(expectField(m, "name").string, "m"));
-
-            try writer.writeAll("///\n");
-            try writer.writeByteNTimes(' ', depth * 4);
-            try writer.writeAll("/// The elements of the matrix are stored in row-major order.\n");
-            try writer.writeByteNTimes(' ', depth * 4);
-
-            try writer.print("pub const {s} = ", .{name});
-            try handleType(expectField(m, "type").object, writer, depth);
+            try writer.print("pub const {s} = ", .{fmtDeclName(name)});
+            try handleType(expectField(vec_struct, "type").object, writer, depth);
             try writer.writeByte(';');
 
             return true;
@@ -519,7 +523,7 @@ const Quirks = struct {
             const subtype = expectField(xy_wh, "type").object;
             assert(expectKind(subtype) == .@"struct");
 
-            try writer.print("pub const {s} = ", .{name});
+            try writer.print("pub const {s} = ", .{fmtDeclName(name)});
             try handleType(subtype, writer, depth);
             try writer.writeByte(';');
 
