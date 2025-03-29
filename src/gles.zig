@@ -108,7 +108,7 @@ pub fn getApi(comptime api: Api) type {
             extern fn glGetShaderInfoLog(shader: GLuint, bufSize: GLsizei, length: *GLsizei, infoLog: [*]GLchar) void;
             extern fn glGetShaderPrecisionFormat(shadertype: GLenum, precisiontype: GLenum, range: *GLint, precision: *GLint) void;
             extern fn glGetShaderSource(shader: GLuint, bufSize: GLsizei, length: *GLsizei, source: [*]GLchar) void;
-            extern fn glGetString(name: GLenum) [*:0]const GLubyte;
+            extern fn glGetString(name: GLenum) ?[*:0]const GLubyte;
             extern fn glGetTexParameterfv(target: GLenum, pname: GLenum, params: [*]GLfloat) void;
             extern fn glGetTexParameteriv(target: GLenum, pname: GLenum, params: [*]GLint) void;
             extern fn glGetUniformfv(program: GLuint, location: GLint, params: [*]GLfloat) void;
@@ -237,7 +237,7 @@ pub fn getApi(comptime api: Api) type {
             extern fn glClearBufferuiv(buffer: GLenum, drawbuffer: GLint, value: [*]const GLuint) void;
             extern fn glClearBufferfv(buffer: GLenum, drawbuffer: GLint, value: [*]const GLfloat) void;
             extern fn glClearBufferfi(buffer: GLenum, drawbuffer: GLint, depth: GLfloat, stencil: GLint) void;
-            extern fn glGetStringi(name: GLenum, index: GLuint) [*:0]const GLubyte;
+            extern fn glGetStringi(name: GLenum, index: GLuint) ?[*:0]const GLubyte;
             extern fn glCopyBufferSubData(readTarget: GLenum, writeTarget: GLenum, readOffset: GLintptr, writeOffset: GLintptr, size: GLsizeiptr) void;
             extern fn glGetUniformIndices(program: GLuint, uniformCount: GLsizei, uniformNames: [*]const [*:0]const GLchar, uniformIndices: [*]GLuint) void;
             extern fn glGetActiveUniformsiv(program: GLuint, uniformCount: GLsizei, uniformIndices: [*]const GLuint, pname: GLenum, params: [*]GLint) void;
@@ -440,14 +440,14 @@ pub fn getApi(comptime api: Api) type {
 
             fn glGetProgramInfoLog(program: GLuint, info_log: []u8) []u8 {
                 var written: GLsizei = 0;
-                Externs.glGetProgramInfoLog(program, info_log.len, &written, @ptrCast(info_log.ptr));
-                return info_log[0..written];
+                Externs.glGetProgramInfoLog(program, @intCast(info_log.len), &written, @ptrCast(info_log.ptr));
+                return info_log[0..@intCast(written)];
             }
 
             fn glGetShaderInfoLog(shader: GLuint, info_log: []u8) []u8 {
                 var written: GLsizei = 0;
-                Externs.glGetShaderInfoLog(shader, info_log.len, &written, @ptrCast(info_log.ptr));
-                return info_log[0..written];
+                Externs.glGetShaderInfoLog(shader, @intCast(info_log.len), &written, @ptrCast(info_log.ptr));
+                return info_log[0..@intCast(written)];
             }
 
             fn glGetShaderSource(shader: GLuint, source: []u8) []u8 {
@@ -456,8 +456,9 @@ pub fn getApi(comptime api: Api) type {
                 return source[0..written];
             }
 
-            fn glGetString(name: GLenum) []const u8 {
-                return std.mem.span(Externs.glGetString(name));
+            fn glGetString(name: GLenum) ?[]const u8 {
+                const cstr = Externs.glGetString(name) orelse return null;
+                return std.mem.span(cstr);
             }
 
             fn glGetUniformLocation(program: GLuint, name: []const u8) GLint {
@@ -465,12 +466,7 @@ pub fn getApi(comptime api: Api) type {
             }
 
             fn glShaderSource(shader: GLuint, strings: []const [:0]const u8) void {
-                var mem: [4096]u8 = undefined;
-                var fba = std.heap.FixedBufferAllocator.init(&mem);
-
-                const c_strings: []const [*:0]const GLchar = Helpers.zigStringsToCStrings(strings, fba.allocator());
-
-                Externs.glShaderSource(shader, @intCast(c_strings.len), c_strings.ptr, null);
+                Externs.glShaderSource(shader, @intCast(strings.len), @ptrCast(strings), null);
             }
 
             fn glUniform1fv(location: GLint, uniform_count: GLsizei, value: []const GLfloat) void {
@@ -663,8 +659,9 @@ pub fn getApi(comptime api: Api) type {
                 Externs.glClearBufferfv(buffer, drawbuffer, value.ptr);
             }
 
-            fn glGetStringi(name: GLenum, index: GLuint) []const u8 {
-                return std.mem.span(Externs.glGetStringi(name, index));
+            fn glGetStringi(name: GLenum, index: GLuint) ?[]const u8 {
+                const cstr = Externs.glGetStringi(name, index) orelse return null;
+                return std.mem.span(cstr);
             }
 
             fn glGetUniformIndices(program: GLuint, uniform_names: []const [:0]const u8, uniform_indices: []GLuint) void {

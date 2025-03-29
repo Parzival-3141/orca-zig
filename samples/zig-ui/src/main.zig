@@ -1,72 +1,76 @@
 const std = @import("std");
 const oc = @import("root");
-const ui = oc.ui;
 
-// Unfortunately needed to force the comptime code in orca.zig to be run
-comptime {
-    _ = oc;
-}
+var frame_size: oc.vec2 = .{ .x = 1200, .y = 838 };
 
-var frame_size: oc.Vec2 = .{ .x = 1200, .y = 838 };
+var surface: oc.surface = undefined;
+var renderer: oc.canvas_renderer = undefined;
+var canvas: oc.canvas_context = undefined;
 
-var surface: oc.Surface = undefined;
-var canvas: oc.Canvas = undefined;
-var font_regular: oc.Font = undefined;
-var font_bold: oc.Font = undefined;
-var ui_ctx: ui.Context = undefined;
-var text_arena: oc.Arena = undefined;
-var log_arena: oc.Arena = undefined;
-var log_lines: oc.Str8List = undefined;
+var font_regular: oc.font = undefined;
+var font_bold: oc.font = undefined;
 
-const Cmd = enum {
-    None,
-    SetDarkTheme,
-    SetLightTheme,
-};
-var cmd: Cmd = .None;
+var ui: *oc.ui_context = undefined;
+
+var text_arena: oc.arena = undefined;
+var log_arena: oc.arena = undefined;
+var log_lines: oc.str8_list = undefined;
+
+var theme: enum { dark, light } = .dark;
 
 pub fn onInit() !void {
-    oc.windowSetTitle("Orca Zig UI Demo");
-    oc.windowSetSize(frame_size);
+    oc.window_set_title(oc.to_str8(@constCast("Orca Zig UI Demo")));
+    oc.window_set_size(frame_size);
 
-    surface = oc.Surface.canvas();
-    canvas = oc.Canvas.create();
-    ui.init(&ui_ctx);
+    renderer = oc.canvas_renderer_create();
+    surface = oc.canvas_surface_create(renderer);
+    canvas = oc.canvas_context_create();
 
-    const fonts = [_]*oc.Font{ &font_regular, &font_bold };
+    const fonts = [_]*oc.font{ &font_regular, &font_bold };
     const font_names = [_][]const u8{ "/OpenSans-Regular.ttf", "/OpenSans-Bold.ttf" };
     for (fonts, font_names) |font, name| {
-        var scratch = oc.Arena.scratchBegin();
-        defer scratch.end();
+        const scratch = oc.scratch_begin();
+        defer oc.arena_scope_end(scratch);
 
-        var file = oc.File.open(name, .{ .read = true }, .{}) catch |e| {
+        const file = oc.file_open(
+            oc.to_str8(@constCast(name)),
+            @intFromEnum(oc.file_access_enum.FILE_ACCESS_READ),
+            0,
+        );
+        if (oc.file_last_error(file) != @intFromEnum(oc.io_error_enum.IO_OK)) {
             oc.log.err("Couldn't open file {s}", .{name}, @src());
-            return e;
+            return;
+        }
+
+        const size = oc.file_size(file);
+        const buffer: [*]u8 = @ptrCast(oc.arena_push(scratch.arena, size));
+        _ = oc.file_read(file, size, buffer);
+        oc.file_close(file);
+
+        var ranges = [5]oc.unicode_range{
+            .{ .firstCodePoint = 0x0000, .count = 127 }, // BASIC_LATIN
+            .{ .firstCodePoint = 0x0080, .count = 127 }, // C1_CONTROLS_AND_LATIN_1_SUPPLEMENT
+            .{ .firstCodePoint = 0x0100, .count = 127 }, // LATIN_EXTENDED_A
+            .{ .firstCodePoint = 0x0180, .count = 207 }, // LATIN_EXTENDED_B
+            .{ .firstCodePoint = 0xfff0, .count = 15 }, //  SPECIALS
         };
 
-        const size = try file.getSize();
-        const buffer = scratch.arena.push(@intCast(size));
-        _ = try file.read(buffer);
-        file.close();
-
-        var ranges = oc.UnicodeRange.range(&[_]oc.UnicodeRange.Enum{
-            .BasicLatin,
-            .C1ControlsAndLatin1Supplement,
-            .LatinExtendedA,
-            .LatinExtendedB,
-            .Specials,
-        });
-
-        font.* = oc.Font.createFromMemory(buffer, &ranges);
+        font.* = oc.font_create_from_memory(
+            oc.str8_from_buffer(size, buffer),
+            @intCast(ranges.len),
+            &ranges,
+        );
     }
 
-    text_arena = oc.Arena.init();
-    log_arena = oc.Arena.init();
-    log_lines = oc.Str8List.init();
+    ui = oc.ui_context_create(font_regular).?;
+
+    oc.arena_init(&text_arena);
+    oc.arena_init(&log_arena);
+    oc.list_init(&log_lines.list);
 }
 
-pub fn onRawEvent(event: *const oc.Event) void {
-    oc.ui.processCEvent(event.c_event);
+pub fn onRawEvent(event: *oc.event) void {
+    oc.ui_process_event(event);
 }
 
 pub fn onResize(width: u32, height: u32) void {
@@ -74,784 +78,859 @@ pub fn onResize(width: u32, height: u32) void {
     frame_size.y = @floatFromInt(height);
 }
 
-pub fn onFrameRefresh() void {
-    var scratch = oc.Arena.scratchBegin();
-    defer scratch.end();
+pub fn onFrameRefresh() !void {
+    const scratch = oc.scratch_begin();
+    defer oc.arena_scope_end(scratch);
 
-    switch (cmd) {
-        .SetDarkTheme => ui.setTheme(ui.dark_theme),
-        .SetLightTheme => ui.setTheme(ui.light_theme),
-        .None => {},
-    }
-    cmd = .None;
-
-    var default_style = ui.Style{ .font = font_regular };
     {
-        ui.beginFrame(frame_size, &default_style);
-        defer ui.endFrame();
+        oc.ui_frame_begin(frame_size);
+        defer oc.ui_frame_end();
+
+        switch (theme) {
+            .dark => oc.ui_theme_dark(),
+            .light => oc.ui_theme_light(),
+        }
+
+        oc.ui_style_set_var_str8(.UI_BG_COLOR, oc.to_str8(@constCast("bg-0")));
+        oc.ui_style_set_i32(.UI_CONSTRAIN_Y, 1);
 
         //--------------------------------------------------------------------------------------------
         // Menu bar
         //--------------------------------------------------------------------------------------------
         {
-            ui.menuBarBegin("menu_bar");
-            defer ui.menuBarEnd();
+            oc.ui_menu_bar_begin(@constCast("menu_bar"));
+            defer oc.ui_menu_bar_end();
 
             {
-                ui.menuBegin("File");
-                defer ui.menuEnd();
+                oc.ui_menu_begin(@constCast("file-menu"), @constCast("File"));
+                defer oc.ui_menu_end();
 
-                if (ui.menuButton("Quit").pressed) {
-                    oc.requestQuit();
+                if (oc.ui_menu_button(@constCast("quit"), @constCast("Quit")).pressed) {
+                    oc.request_quit();
                 }
             }
 
             {
-                ui.menuBegin("Theme");
-                defer ui.menuEnd();
+                oc.ui_menu_begin(@constCast("theme-menu"), @constCast("Theme"));
+                defer oc.ui_menu_end();
 
-                if (ui.menuButton("Dark theme").pressed) {
-                    cmd = .SetDarkTheme;
+                if (oc.ui_menu_button(@constCast("dark"), @constCast("Dark theme")).pressed) {
+                    theme = .dark;
                 }
-                if (ui.menuButton("Light theme").pressed) {
-                    cmd = .SetLightTheme;
+                if (oc.ui_menu_button(@constCast("light"), @constCast("Light theme")).pressed) {
+                    theme = .light;
                 }
             }
         }
 
         {
-            ui.panelBegin("main panel", .{});
-            defer ui.panelEnd();
+            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("main panel")));
+            defer _ = oc.ui_box_end();
+
+            oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+            oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1, .relax = 1 }));
 
             {
-                ui.styleNext(.{
-                    .size = .{
-                        .width = .fill_parent,
-                        .height = .{ .custom = .{ .kind = .Parent, .value = 1, .relax = 1 } },
-                    },
-                    .layout = .{
-                        .axis = .X,
-                        .margin = .{ .x = 16, .y = 16 },
-                        .spacing = 16,
-                    },
-                });
-                _ = ui.boxBegin("Background", .{ .draw_background = true });
-                defer _ = ui.boxEnd();
+                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("background")));
+                defer _ = oc.ui_box_end();
 
-                widgets(scratch.arena);
+                oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+                oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1, .relax = 1 }));
+                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_X));
+                oc.ui_style_set_f32(.UI_MARGIN_X, 16);
+                oc.ui_style_set_f32(.UI_MARGIN_Y, 16);
+                oc.ui_style_set_f32(.UI_SPACING, 16);
 
-                styling(scratch.arena);
-            }
-        }
-    }
+                {
+                    column_begin("widgets", 1.0 / 3.0);
+                    defer column_end();
 
-    _ = canvas.select();
-    surface.select();
+                    {
+                        _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("top")));
+                        defer _ = oc.ui_box_end();
 
-    oc.Canvas.setColor(ui_ctx.theme.bg0);
-    oc.Canvas.clear();
+                        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+                        oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_X));
+                        oc.ui_style_set_f32(.UI_SPACING, 32);
 
-    ui.draw();
-    canvas.render();
-    surface.present();
-}
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("top_left")));
+                            defer _ = oc.ui_box_end();
 
-var checkbox_checked: bool = false;
-var v_slider_value: f32 = 0;
-var v_slider_logged_value: f32 = 0;
-var v_slider_log_time: f64 = 0;
-var radio_selected: usize = 0;
-var h_slider_value: f32 = 0;
-var h_slider_logged_value: f32 = 0;
-var h_slider_log_time: f64 = 0;
-var text: []const u8 = "Text box";
-var selected: ?usize = null;
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                            oc.ui_style_set_f32(.UI_SPACING, 24);
 
-fn widgets(arena: *oc.Arena) void {
-    columnBegin("Widgets", 1.0 / 3.0);
-    defer columnEnd();
+                            //-----------------------------------------------------------------------------
+                            // Label
+                            //-----------------------------------------------------------------------------
+                            _ = oc.ui_label(@constCast("label"), @constCast("Label"));
 
-    {
-        ui.styleNext(.{
-            .size = .{
-                .width = .fill_parent,
-            },
-            .layout = .{
-                .axis = .X,
-                .spacing = 32,
-            },
-        });
-        _ = ui.boxBegin("top", .{});
-        defer _ = ui.boxEnd();
+                            //-----------------------------------------------------------------------------
+                            // Button
+                            //-----------------------------------------------------------------------------
+                            if (oc.ui_button(@constCast("button"), @constCast("Button")).clicked) {
+                                log_push("Button clicked");
+                            }
 
-        {
-            ui.styleNext(.{
-                .layout = .{
-                    .axis = .Y,
-                    .spacing = 24,
-                },
-            });
-            _ = ui.boxBegin("top_left", .{});
-            defer _ = ui.boxEnd();
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("checkbox")));
+                                defer _ = oc.ui_box_end();
 
-            //-----------------------------------------------------------------------------
-            // Label
-            //-----------------------------------------------------------------------------
-            _ = ui.makeLabel("Label");
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_X));
+                                oc.ui_style_set_i32(.UI_ALIGN_Y, @intFromEnum(oc.ui_align.UI_ALIGN_CENTER));
+                                oc.ui_style_set_f32(.UI_SPACING, 8);
+                                oc.ui_style_set_f32(.UI_MARGIN_X, 2);
 
-            //-----------------------------------------------------------------------------
-            // Button
-            //-----------------------------------------------------------------------------
-            if (ui.button("Button").clicked) {
-                logPush("Button clicked");
-            }
+                                //-------------------------------------------------------------------------
+                                // Checkbox
+                                //-------------------------------------------------------------------------
+                                const S = struct {
+                                    var checked: bool = false;
+                                };
+                                if (oc.ui_checkbox(@constCast("checkbox"), &S.checked).clicked) {
+                                    if (S.checked) {
+                                        log_push("Checkbox checked");
+                                    } else {
+                                        log_push("Checkbox unchecked");
+                                    }
+                                }
 
-            {
-                ui.styleNext(.{
-                    .layout = .{
-                        .axis = .X,
-                        .alignment = .{ .y = .Center },
-                        .spacing = 8,
-                    },
-                });
-                _ = ui.boxBegin("checkbox", .{});
-                defer _ = ui.boxEnd();
+                                _ = oc.ui_label(@constCast("label"), @constCast("Checkbox"));
+                            }
+                        }
 
-                //-------------------------------------------------------------------------
-                // Checkbox
-                //-------------------------------------------------------------------------
-                if (ui.checkbox("checkbox", &checkbox_checked).clicked) {
-                    if (checkbox_checked) {
-                        logPush("Checkbox checked");
-                    } else {
-                        logPush("Checkbox unhecked");
+                        //---------------------------------------------------------------------------------
+                        // Vertical slider
+                        //---------------------------------------------------------------------------------
+                        const vSlider = struct {
+                            var value: f32 = 0;
+                            var logged_value: f32 = 0;
+                            var log_time: f64 = 0;
+                        };
+
+                        {
+                            oc.ui_style_rule_begin(oc.to_str8(@constCast("v_slider")));
+                            defer oc.ui_style_rule_end();
+
+                            oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 24 }));
+                            oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 130 }));
+                        }
+
+                        _ = oc.ui_slider(@constCast("v_slider"), &vSlider.value);
+
+                        // TODO missing oc.clock_time
+                        // const now = oc.clock_time(.CLOCK_MONOTONIC);
+                        // if((now - vSlider.log_time) >= 0.2 and vSlider.value != vSlider.logged_value)
+                        // {
+                        //     log_pushf("Vertical slider moved to %f", vSlider.value);
+                        //     vSlider.logged_value = vSlider.value;
+                        //     vSlider.log_time = now;
+                        // }
+
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("top_right")));
+                            defer _ = oc.ui_box_end();
+
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                            oc.ui_style_set_f32(.UI_SPACING, 24);
+
+                            //-----------------------------------------------------------------------------
+                            // Tooltip
+                            //-----------------------------------------------------------------------------
+                            if (oc.ui_label(@constCast("label"), @constCast("Tooltip")).hover) {
+                                oc.ui_tooltip(@constCast("tooltip"), @constCast("Hi"));
+                            }
+
+                            //-----------------------------------------------------------------------------
+                            // Radio group
+                            //-----------------------------------------------------------------------------
+
+                            const Radio = struct {
+                                var selected: i32 = 0;
+                            };
+                            const options = [_]oc.str8{
+                                oc.to_str8(@constCast("Radio 1")),
+                                oc.to_str8(@constCast("Radio 2")),
+                            };
+                            var radioGroupInfo: oc.ui_radio_group_info = .{
+                                .changed = false,
+                                .selectedIndex = Radio.selected,
+                                .optionCount = options.len,
+                                .options = @constCast(&options),
+                            };
+                            const result = oc.ui_radio_group(@constCast("radio_group"), &radioGroupInfo);
+                            Radio.selected = result.selectedIndex;
+                            if (result.changed) {
+                                log_pushf("Selected {s}", .{options[@intCast(result.selectedIndex)].ptr});
+                            }
+
+                            //-----------------------------------------------------------------------------
+                            // Horizontal slider
+                            //-----------------------------------------------------------------------------
+
+                            const hSlider = struct {
+                                var value: f32 = 0;
+                                var logged_value: f32 = 0;
+                                var log_time: f64 = 0;
+                            };
+
+                            {
+                                oc.ui_style_rule_begin(oc.to_str8(@constCast("h_slider")));
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 130 }));
+                                oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 24 }));
+                            }
+
+                            _ = oc.ui_slider(@constCast("h_slider"), &hSlider.value);
+
+                            // TODO missing oc.clock_time
+                            // const now = oc.clock_time(.CLOCK_MONOTONIC);
+                            // if((now - hSlider.log_time) >= 0.2 and hSlider.value != hSlider.logged_value)
+                            // {
+                            //     log_pushf("hSlider moved to %f", hSlider.value);
+                            //     hSlider.logged_value = hSlider.value;
+                            //     hSlider.log_time = now;
+                            // }
+                        }
+                    }
+
+                    //-------------------------------------------------------------------------------------
+                    // Text box
+                    //-------------------------------------------------------------------------------------
+                    {
+                        {
+                            oc.ui_style_rule_begin(oc.to_str8(@constCast("text")));
+                            defer oc.ui_style_rule_end();
+
+                            oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 305 }));
+                        }
+
+                        const S = struct {
+                            var text_info: oc.ui_text_box_info = std.mem.zeroInit(oc.ui_text_box_info, .{
+                                .defaultText = oc.to_str8(@constCast("Type here")),
+                            });
+                        };
+                        const result = oc.ui_text_box(@constCast("text"), scratch.arena, &S.text_info);
+                        if (result.changed) {
+                            oc.arena_clear(&text_arena);
+                            S.text_info.text = oc.str8_push_copy(&text_arena, result.text);
+                        }
+                        if (result.accepted) {
+                            log_pushf("Entered text \"{s}\"", .{S.text_info.text.ptr});
+                        }
+                    }
+
+                    //-------------------------------------------------------------------------------------
+                    // Select
+                    //-------------------------------------------------------------------------------------
+                    {
+                        const S = struct {
+                            var selected: i32 = -1;
+                        };
+                        const options = [_]oc.str8{
+                            oc.to_str8(@constCast("Option 1")),
+                            oc.to_str8(@constCast("Option 2")),
+                        };
+
+                        var info: oc.ui_select_popup_info = .{
+                            .changed = false,
+                            .selectedIndex = S.selected,
+                            .optionCount = 2,
+                            .options = @constCast(&options),
+                            .placeholder = oc.to_str8(@constCast("Select")),
+                        };
+                        const result = oc.ui_select_popup(@constCast("select"), &info);
+                        if (result.selectedIndex != S.selected) {
+                            log_pushf("Selected {s}", .{options[@intCast(result.selectedIndex)].ptr});
+                        }
+                        S.selected = result.selectedIndex;
+                    }
+
+                    //-------------------------------------------------------------------------------------
+                    // Scrollable panel
+                    //-------------------------------------------------------------------------------------
+                    {
+                        _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("log")));
+                        defer _ = oc.ui_box_end();
+
+                        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+                        oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1, .relax = 1, .minSize = 200 }));
+                        oc.ui_style_set_var_str8(.UI_BG_COLOR, oc.to_str8(@constCast("bg-2")));
+                        oc.ui_style_set_var_str8(.UI_BORDER_COLOR, oc.to_str8(@constCast("border")));
+                        oc.ui_style_set_f32(.UI_BORDER_SIZE, 1);
+                        oc.ui_style_set_var_str8(.UI_ROUNDNESS, oc.to_str8(@constCast("roundness-small")));
+
+                        oc.ui_style_set_i32(.UI_OVERFLOW_Y, @intFromEnum(oc.ui_overflow.UI_OVERFLOW_SCROLL));
+
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("contents")));
+                            defer _ = oc.ui_box_end();
+
+                            oc.ui_style_set_f32(.UI_MARGIN_X, 16);
+                            oc.ui_style_set_f32(.UI_MARGIN_Y, 16);
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+
+                            if (oc.list_empty(log_lines.list)) {
+                                {
+                                    oc.ui_style_rule_begin(oc.to_str8(@constCast("label")));
+                                    defer oc.ui_style_rule_end();
+
+                                    oc.ui_style_set_var_str8(.UI_COLOR, oc.to_str8(@constCast("text-2")));
+                                }
+                                _ = oc.ui_label(@constCast("label"), @constCast("Log"));
+                            }
+
+                            var i: usize = 0;
+                            var log_line: ?*oc.str8_elt = oc_list_checked_entry(log_lines.list.first, oc.str8_elt, "listElt");
+                            while (log_line) |line| : ({
+                                i += 1;
+                                log_line = oc_list_checked_entry(line.listElt.next, oc.str8_elt, "listElt");
+                            }) {
+                                var buf: [15]u8 = undefined;
+                                const id = try std.fmt.bufPrint(&buf, "{d}", .{i});
+                                _ = oc.ui_label_str8(oc.to_str8(id), line.string);
+                            }
+                        }
                     }
                 }
 
-                _ = ui.makeLabel("Checkbox");
+                //-----------------------------------------------------------------------------------------
+                // Styling
+                //-----------------------------------------------------------------------------------------
+                {
+                    column_begin("styling", 2.0 / 3.0);
+                    defer column_end();
+
+                    const Unselected = struct {
+                        var width: f32 = 16;
+                        var height: f32 = 16;
+                        var roundness: f32 = 8;
+                        var bgColor: oc.color = .{
+                            .r = 0,
+                            .g = 0,
+                            .b = 0,
+                            .a = 0,
+                            .colorSpace = .COLOR_SPACE_RGB,
+                        };
+                        var borderColor: oc.color = .{
+                            .r = 0.976,
+                            .g = 0.976,
+                            .b = 0.976,
+                            .a = 0.35,
+                            .colorSpace = .COLOR_SPACE_RGB,
+                        };
+                        var borderSize: f32 = 1;
+                        var whenStatus = oc.to_str8(@constCast(""));
+                    };
+
+                    const Selected = struct {
+                        var width: f32 = 16;
+                        var height: f32 = 16;
+                        var roundness: f32 = 8;
+                        var centerColor: oc.color = .{
+                            .r = 1,
+                            .g = 1,
+                            .b = 1,
+                            .a = 1,
+                            .colorSpace = .COLOR_SPACE_RGB,
+                        };
+                        var bgColor: oc.color = .{
+                            .r = 0.33,
+                            .g = 0.66,
+                            .b = 1,
+                            .a = 1,
+                            .colorSpace = .COLOR_SPACE_RGB,
+                        };
+                        var borderSize: f32 = 1;
+                        var whenStatus = oc.to_str8(@constCast(""));
+                        var index: i32 = 0;
+                    };
+
+                    const Label = struct {
+                        var fontColor: oc.color = .{ .r = 0.976, .g = 0.976, .b = 0.976, .a = 1, .colorSpace = .COLOR_SPACE_RGB };
+                        var font: *oc.font = &font_regular;
+                        var fontSize: f32 = 14;
+                    };
+
+                    {
+                        _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("styled_radios")));
+                        defer _ = oc.ui_box_end();
+
+                        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+                        oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 152 }));
+                        oc.ui_style_set_color(.UI_BG_COLOR, .{ .r = 0.086, .g = 0.086, .b = 0.102, .a = 1, .colorSpace = .COLOR_SPACE_RGB });
+                        oc.ui_style_set_var_str8(.UI_ROUNDNESS, oc.to_str8(@constCast("roundness-small")));
+
+                        oc.ui_style_set_i32(.UI_ALIGN_X, @intFromEnum(oc.ui_align.UI_ALIGN_CENTER));
+                        oc.ui_style_set_i32(.UI_ALIGN_Y, @intFromEnum(oc.ui_align.UI_ALIGN_CENTER));
+
+                        {
+                            var list: oc.str8_list = std.mem.zeroes(oc.str8_list);
+                            oc.str8_list_push(scratch.arena, &list, oc.to_str8(@constCast("radio_group .radio-row")));
+                            oc.str8_list_push(scratch.arena, &list, Unselected.whenStatus);
+                            oc.str8_list_push(scratch.arena, &list, oc.to_str8(@constCast(" .radio")));
+                            const unselected_pattern = oc.str8_list_join(scratch.arena, list);
+
+                            {
+                                oc.ui_style_rule_begin(unselected_pattern);
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = Unselected.width }));
+                                oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = Unselected.height }));
+                                oc.ui_style_set_color(.UI_BG_COLOR, Unselected.bgColor);
+                                oc.ui_style_set_color(.UI_BORDER_COLOR, Unselected.borderColor);
+                                oc.ui_style_set_f32(.UI_BORDER_SIZE, Unselected.borderSize);
+                                oc.ui_style_set_f32(.UI_ROUNDNESS, Unselected.roundness);
+                            }
+                        }
+
+                        {
+                            var list: oc.str8_list = std.mem.zeroes(oc.str8_list);
+                            oc.str8_list_push(scratch.arena, &list, oc.to_str8(@constCast("radio_group .radio-row")));
+                            oc.str8_list_push(scratch.arena, &list, Selected.whenStatus);
+                            oc.str8_list_push(scratch.arena, &list, oc.to_str8(@constCast(" .radio_selected")));
+                            const selected_pattern = oc.str8_list_join(scratch.arena, list);
+
+                            {
+                                oc.ui_style_rule_begin(selected_pattern);
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = Selected.width }));
+                                oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = Selected.height }));
+                                oc.ui_style_set_color(.UI_BG_COLOR, Selected.bgColor);
+                                oc.ui_style_set_color(.UI_COLOR, Selected.centerColor);
+                                oc.ui_style_set_f32(.UI_ROUNDNESS, Selected.roundness);
+                            }
+                        }
+
+                        {
+                            oc.ui_style_rule_begin(oc.to_str8(@constCast("radio_group label")));
+                            defer oc.ui_style_rule_end();
+
+                            oc.ui_style_set_color(.UI_COLOR, Label.fontColor);
+                            oc.ui_style_set_font(.UI_FONT, Label.font.*);
+                            oc.ui_style_set_f32(.UI_TEXT_SIZE, Label.fontSize);
+                        }
+
+                        const options = [_]oc.str8{
+                            oc.to_str8(@constCast("I")),
+                            oc.to_str8(@constCast("Am")),
+                            oc.to_str8(@constCast("Stylish")),
+                        };
+                        var radioGroupInfo: oc.ui_radio_group_info = .{
+                            .changed = false,
+                            .selectedIndex = Selected.index,
+                            .optionCount = options.len,
+                            .options = @constCast(&options),
+                        };
+                        const result = oc.ui_radio_group(@constCast("radio_group"), &radioGroupInfo);
+                        Selected.index = result.selectedIndex;
+                    }
+
+                    {
+                        _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("controls")));
+                        defer _ = oc.ui_box_end();
+
+                        oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_X));
+                        oc.ui_style_set_f32(.UI_SPACING, 32);
+
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("unselected")));
+                            defer _ = oc.ui_box_end();
+
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                            oc.ui_style_set_f32(.UI_SPACING, 16);
+
+                            {
+                                oc.ui_style_rule_begin(oc.to_str8(@constCast("radio-label")));
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_f32(.UI_TEXT_SIZE, 16);
+                            }
+                            _ = oc.ui_label(@constCast("radio-label"), @constCast("Radio style"));
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("size")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+
+                                var widthSlider: f32 = (Unselected.width - 8) / 16;
+                                labeled_slider("Width", &widthSlider);
+                                Unselected.width = 8 + widthSlider * 16;
+
+                                var heightSlider: f32 = (Unselected.height - 8) / 16;
+                                labeled_slider("Height", &heightSlider);
+                                Unselected.height = 8 + heightSlider * 16;
+
+                                var roundnessSlider: f32 = (Unselected.roundness - 4) / 8;
+                                labeled_slider("Roundness", &roundnessSlider);
+                                Unselected.roundness = 4 + roundnessSlider * 8;
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("background")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+                                labeled_slider("Background R", &Unselected.bgColor.r);
+                                labeled_slider("Background G", &Unselected.bgColor.g);
+                                labeled_slider("Background B", &Unselected.bgColor.b);
+                                labeled_slider("Background A", &Unselected.bgColor.a);
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("border")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+                                labeled_slider("Border R", &Unselected.borderColor.r);
+                                labeled_slider("Border G", &Unselected.borderColor.g);
+                                labeled_slider("Border B", &Unselected.borderColor.b);
+                                labeled_slider("Border A", &Unselected.borderColor.a);
+                            }
+
+                            var borderSizeSlider: f32 = Unselected.borderSize / 5;
+                            labeled_slider("Border size", &borderSizeSlider);
+                            Unselected.borderSize = borderSizeSlider * 5;
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("status_override")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 10);
+                                _ = oc.ui_label(@constCast("label"), @constCast("Override"));
+
+                                const Status = struct {
+                                    var index: i32 = 0;
+                                };
+
+                                const options = [_]oc.str8{
+                                    oc.to_str8(@constCast("Always")),
+                                    oc.to_str8(@constCast("When hovering")),
+                                    oc.to_str8(@constCast("When active")),
+                                };
+                                var statusInfo: oc.ui_radio_group_info = .{
+                                    .changed = false,
+                                    .selectedIndex = Status.index,
+                                    .optionCount = options.len,
+                                    .options = @constCast(&options),
+                                };
+                                const result = oc.ui_radio_group(@constCast("status"), &statusInfo);
+                                Status.index = result.selectedIndex;
+                                Unselected.whenStatus = switch (Status.index) {
+                                    0 => oc.to_str8(@constCast("")),
+                                    1 => oc.to_str8(@constCast(".hover")),
+                                    2 => oc.to_str8(@constCast(".active")),
+                                    else => Unselected.whenStatus,
+                                };
+                            }
+                        }
+
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("selected")));
+                            defer _ = oc.ui_box_end();
+
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                            oc.ui_style_set_f32(.UI_SPACING, 16);
+
+                            {
+                                oc.ui_style_rule_begin(oc.to_str8(@constCast("radio-label")));
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_f32(.UI_TEXT_SIZE, 16);
+                            }
+                            _ = oc.ui_label(@constCast("radio-label"), @constCast("Radio style"));
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("size")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+
+                                var widthSlider: f32 = (Selected.width - 8) / 16;
+                                labeled_slider("Width", &widthSlider);
+                                Selected.width = 8 + widthSlider * 16;
+
+                                var heightSlider: f32 = (Selected.height - 8) / 16;
+                                labeled_slider("Height", &heightSlider);
+                                Selected.height = 8 + heightSlider * 16;
+
+                                var roundnessSlider: f32 = (Selected.roundness - 4) / 8;
+                                labeled_slider("Roundness", &roundnessSlider);
+                                Selected.roundness = 4 + roundnessSlider * 8;
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("background")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+                                labeled_slider("Background R", &Selected.bgColor.r);
+                                labeled_slider("Background G", &Selected.bgColor.g);
+                                labeled_slider("Background B", &Selected.bgColor.b);
+                                labeled_slider("Background A", &Selected.bgColor.a);
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("center")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 4);
+                                labeled_slider("Center R", &Selected.centerColor.r);
+                                labeled_slider("Center G", &Selected.centerColor.g);
+                                labeled_slider("Center B", &Selected.centerColor.b);
+                                labeled_slider("Center A", &Selected.centerColor.a);
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("spacer")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 24 }));
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("status_override")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                                oc.ui_style_set_f32(.UI_SPACING, 10);
+                                _ = oc.ui_label(@constCast("label"), @constCast("Override"));
+
+                                const Status = struct {
+                                    var index: i32 = 0;
+                                };
+
+                                const options = [_]oc.str8{
+                                    oc.to_str8(@constCast("Always")),
+                                    oc.to_str8(@constCast("When hovering")),
+                                    oc.to_str8(@constCast("When active")),
+                                };
+                                var statusInfo: oc.ui_radio_group_info = .{
+                                    .changed = false,
+                                    .selectedIndex = Status.index,
+                                    .optionCount = options.len,
+                                    .options = @constCast(&options),
+                                };
+                                const result = oc.ui_radio_group(@constCast("status"), &statusInfo);
+                                Status.index = result.selectedIndex;
+                                Selected.whenStatus = switch (Status.index) {
+                                    0 => oc.to_str8(@constCast("")),
+                                    1 => oc.to_str8(@constCast(".hover")),
+                                    2 => oc.to_str8(@constCast(".active")),
+                                    else => Selected.whenStatus,
+                                };
+                            }
+                        }
+
+                        {
+                            _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("label")));
+                            defer _ = oc.ui_box_end();
+
+                            oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+                            oc.ui_style_set_f32(.UI_SPACING, 16);
+
+                            {
+                                oc.ui_style_rule_begin(oc.to_str8(@constCast("label-style")));
+                                defer oc.ui_style_rule_end();
+
+                                oc.ui_style_set_f32(.UI_TEXT_SIZE, 16);
+                            }
+                            _ = oc.ui_label(@constCast("label-style"), @constCast("Label style"));
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("font_color")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_f32(.UI_SPACING, 8);
+
+                                {
+                                    oc.ui_style_rule_begin(oc.to_str8(@constCast("font-color")));
+                                    defer oc.ui_style_rule_end();
+
+                                    oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 100 }));
+                                }
+                                _ = oc.ui_label(@constCast("font-color"), @constCast("Font color"));
+
+                                const Color = struct {
+                                    var selected: i32 = 0;
+                                };
+
+                                const colorNames = [_]oc.str8{
+                                    oc.to_str8(@constCast("Default")),
+                                    oc.to_str8(@constCast("Red")),
+                                    oc.to_str8(@constCast("Orange")),
+                                    oc.to_str8(@constCast("Amber")),
+                                    oc.to_str8(@constCast("Yellow")),
+                                    oc.to_str8(@constCast("Lime")),
+                                    oc.to_str8(@constCast("Light Green")),
+                                    oc.to_str8(@constCast("Green")),
+                                };
+                                const colors = [_]oc.color{
+                                    .{ .r = 1, .g = 1, .b = 1, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.988, .g = 0.447, .b = 0.353, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 1.000, .g = 0.682, .b = 0.263, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.961, .g = 0.792, .b = 0.314, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.992, .g = 0.871, .b = 0.263, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.682, .g = 0.863, .b = 0.227, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.592, .g = 0.776, .b = 0.373, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                    .{ .r = 0.365, .g = 0.761, .b = 0.392, .a = 1, .colorSpace = .COLOR_SPACE_SRGB },
+                                };
+                                var colorInfo = std.mem.zeroInit(oc.ui_select_popup_info, .{
+                                    .selectedIndex = Color.selected,
+                                    .optionCount = colorNames.len,
+                                    .options = @constCast(&colorNames),
+                                });
+                                const colorResult = oc.ui_select_popup(@constCast("color"), &colorInfo);
+                                Color.selected = colorResult.selectedIndex;
+                                Label.fontColor = colors[@intCast(Color.selected)];
+                            }
+
+                            {
+                                _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("font")));
+                                defer _ = oc.ui_box_end();
+
+                                oc.ui_style_set_f32(.UI_SPACING, 8);
+
+                                {
+                                    oc.ui_style_rule_begin(oc.to_str8(@constCast("font-label")));
+                                    defer oc.ui_style_rule_end();
+
+                                    oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 100 }));
+                                }
+                                _ = oc.ui_label(@constCast("font-label"), @constCast("Font"));
+
+                                const Font = struct {
+                                    var selected: i32 = 0;
+                                };
+
+                                const fontNames = [_]oc.str8{
+                                    oc.to_str8(@constCast("Regular")),
+                                    oc.to_str8(@constCast("Bold")),
+                                };
+                                const fonts = [_]*oc.font{
+                                    &font_regular,
+                                    &font_bold,
+                                };
+                                var fontInfo = std.mem.zeroInit(oc.ui_select_popup_info, .{
+                                    .selectedIndex = Font.selected,
+                                    .optionCount = fontNames.len,
+                                    .options = @constCast(&fontNames),
+                                });
+                                const fontResult = oc.ui_select_popup(@constCast("font_style"), &fontInfo);
+                                Font.selected = fontResult.selectedIndex;
+                                Label.font = fonts[@intCast(Font.selected)];
+                            }
+
+                            var fontSizeSlider: f32 = (Label.fontSize - 8) / 16;
+                            labeled_slider("Font size", &fontSizeSlider);
+                            Label.fontSize = 8 + fontSizeSlider * 16;
+                        }
+                    }
+                }
             }
         }
-
-        //---------------------------------------------------------------------------------
-        // Vertical slider
-        //---------------------------------------------------------------------------------
-        ui.styleNext(.{ .size = .{ .height = .{ .pixels = 130 } } });
-        _ = ui.slider("v_slider", &v_slider_value);
-
-        const now = oc.clock.time(.Monotonic);
-        if ((now - v_slider_log_time) >= 0.2 and v_slider_value != v_slider_logged_value) {
-            logPushf("Vertical slider moved to {d:.3}", .{v_slider_value});
-            v_slider_logged_value = v_slider_value;
-            v_slider_log_time = now;
-        }
-
-        {
-            ui.styleNext(.{
-                .layout = .{
-                    .axis = .Y,
-                    .spacing = 24,
-                },
-            });
-            _ = ui.boxBegin("top right", .{});
-            defer _ = ui.boxEnd();
-
-            //-----------------------------------------------------------------------------
-            // Tooltip
-            //-----------------------------------------------------------------------------
-            if (ui.makeLabel("Tooltip").hovering) {
-                ui.tooltip("Hi");
-            }
-
-            //-----------------------------------------------------------------------------
-            // Radio group
-            //-----------------------------------------------------------------------------
-            var options = [_][]const u8{
-                "Radio 1",
-                "Radio 2",
-            };
-            var radio_group_info = ui.RadioGroupInfo{
-                .selected_index = radio_selected,
-                .options = &options,
-            };
-            const result = ui.radioGroup("radio_group", &radio_group_info);
-            radio_selected = result.selected_index.?;
-            if (result.changed) {
-                logPushf("Selected {s}", .{options[radio_selected]});
-            }
-
-            //-----------------------------------------------------------------------------
-            // Horizontal slider
-            //-----------------------------------------------------------------------------
-            ui.styleNext(.{ .size = .{ .width = .{ .pixels = 130 } } });
-            _ = ui.slider("h_slider", &h_slider_value);
-
-            if ((now - h_slider_log_time) >= 0.2 and h_slider_value != h_slider_logged_value) {
-                logPushf("Slider moved to {d:.3}", .{h_slider_value});
-                h_slider_logged_value = h_slider_value;
-                h_slider_log_time = now;
-            }
-        }
     }
 
-    //-------------------------------------------------------------------------------------
-    // Text box
-    //-------------------------------------------------------------------------------------
-    ui.styleNext(.{
-        .size = .{
-            .width = .{ .pixels = 305 },
-            .height = .text,
-        },
-    });
-    const textResult = ui.textBox("text", arena, text);
-    if (textResult.changed) {
-        text_arena.clear();
-        text = text_arena.pushStr(textResult.text);
-    }
-    if (textResult.accepted) {
-        logPushf("Entered text {s}", .{text});
-    }
+    _ = oc.canvas_context_select(canvas);
 
-    //-------------------------------------------------------------------------------------
-    // Select
-    //-------------------------------------------------------------------------------------
-    var options = [_][]const u8{
-        "Option 1",
-        "Option 2",
-    };
-    var select_popup_info = ui.SelectPopupInfo{
-        .selected_index = selected,
-        .options = &options,
-        .placeholder = "Select",
-    };
-    const selectResult = ui.selectPopup("select", &select_popup_info);
-    if (selectResult.selected_index != selected) {
-        logPushf("Selected {s}", .{options[selectResult.selected_index.?]});
-    }
-    selected = selectResult.selected_index;
-
-    //-------------------------------------------------------------------------------------
-    // Scrollable panel
-    //-------------------------------------------------------------------------------------
-    {
-        ui.styleNext(.{
-            .size = .{
-                .width = .fill_parent,
-                .height = .{
-                    .custom = .{ .kind = .Parent, .value = 1, .relax = 1, .min_size = 200 },
-                },
-            },
-            .bg_color = ui_ctx.theme.bg2,
-            .border_color = ui_ctx.theme.border,
-            .border_size = 1,
-            .roundness = ui_ctx.theme.roundness_small,
-        });
-        _ = ui.panelBegin("log", .{ .draw_background = true, .draw_border = true });
-        defer ui.panelEnd();
-
-        {
-            ui.styleNext(.{
-                .layout = .{
-                    .margin = .{ .x = 16, .y = 16 },
-                },
-            });
-            _ = ui.boxBegin("contents", .{});
-            defer _ = ui.boxEnd();
-
-            if (log_lines.list.empty()) {
-                ui.styleNext(.{ .color = ui_ctx.theme.text2 });
-                _ = ui.makeLabel("Log");
-            }
-
-            var i: i32 = 0;
-            var log_lines_iter = log_lines.iter();
-            while (log_lines_iter.next()) |log_line| {
-                var buf: [15]u8 = undefined;
-                const id = std.fmt.bufPrint(&buf, "{d}", .{i}) catch unreachable;
-                _ = ui.boxBegin(id, .{});
-                defer _ = ui.boxEnd();
-
-                _ = ui.makeLabel(log_line.string.slice());
-
-                i += 1;
-            }
-        }
-    }
+    oc.ui_draw();
+    oc.canvas_render(renderer, canvas, surface);
+    oc.canvas_present(renderer, surface);
 }
 
-var styling_selected_radio: ?usize = 0;
-var unselected_width: f32 = 16;
-var unselected_height: f32 = 16;
-var unselected_roundness: f32 = 8;
-var unselected_bg_color: oc.Color = oc.Color.rgba(0.086, 0.086, 0.102, 1);
-var unselected_border_color: oc.Color = oc.Color.rgba(0.976, 0.976, 0.976, 0.35);
-var unselected_border_size: f32 = 1;
-var unselected_when_status: ui.Status = .{};
-var unselected_status_index: ?usize = 0;
-var selected_width: f32 = 16;
-var selected_height: f32 = 16;
-var selected_roundness: f32 = 8;
-var selected_center_color: oc.Color = oc.Color.rgba(1, 1, 1, 1);
-var selected_bg_color: oc.Color = oc.Color.rgba(0.33, 0.66, 1, 1);
-var selected_when_status: ui.Status = .{};
-var selected_status_index: ?usize = 0;
-var label_font_color: oc.Color = oc.Color.rgba(0.976, 0.976, 0.976, 1);
-var label_font_color_selected: ?usize = 0;
-var label_font: *oc.Font = &font_regular;
-var label_font_selected: ?usize = 0;
-var label_font_size: f32 = 14;
-
-fn styling(arena: *oc.Arena) void {
-    //-----------------------------------------------------------------------------------------
-    // Styling
-    //-----------------------------------------------------------------------------------------
-    // Initial values here are hardcoded from the dark theme and everything is overridden all
-    // the time. In a real program you'd only override what you need and supply the values from
-    // ui_ctx.theme or ui_ctx.theme.palette.
-    //
-    // Rule-based styling is described at
-    // https://www.forkingpaths.dev/posts/23-03-10/rule_based_styling_imgui_ctx.html
-    columnBegin("Styling", 2.0 / 3.0);
-    defer columnEnd();
-
-    {
-        ui.styleNext(.{
-            .size = .{
-                .width = .fill_parent,
-                .height = .{ .pixels = 152 },
-            },
-            .layout = .{
-                .margin = .{ .x = 310, .y = 16 },
-            },
-            .bg_color = ui.dark_theme.bg0,
-            .roundness = ui.dark_theme.roundness_small,
-        });
-        _ = ui.boxBegin("styled_radios", .{ .draw_background = true, .draw_border = true });
-        defer _ = ui.boxEnd();
-
-        resetNextRadioGroupToDarkTheme(arena);
-
-        const unselected_tag = ui.Tag.make("radio");
-        var unselected_pattern = ui.Pattern.init();
-        unselected_pattern.push(arena, .{ .sel = .{ .tag = unselected_tag } });
-        if (!unselected_when_status.empty()) {
-            unselected_pattern.push(arena, .{ .op = .And, .sel = .{ .status = unselected_when_status } });
-        }
-        ui.styleMatchAfter(unselected_pattern, .{
-            .size = .{
-                .width = .{ .pixels = unselected_width },
-                .height = .{ .pixels = unselected_height },
-            },
-            .bg_color = unselected_bg_color,
-            .border_color = unselected_border_color,
-            .border_size = unselected_border_size,
-            .roundness = unselected_roundness,
-        });
-
-        const selected_tag = ui.Tag.make("radio_selected");
-        var selected_pattern = ui.Pattern.init();
-        selected_pattern.push(arena, .{ .sel = .{ .tag = selected_tag } });
-        if (!selected_when_status.empty()) {
-            selected_pattern.push(arena, .{ .op = .And, .sel = .{ .status = selected_when_status } });
-        }
-        ui.styleMatchAfter(selected_pattern, .{
-            .size = .{
-                .width = .{ .pixels = selected_width },
-                .height = .{ .pixels = selected_height },
-            },
-            .color = selected_center_color,
-            .bg_color = selected_bg_color,
-            .roundness = selected_roundness,
-        });
-
-        const label_tag = ui.Tag.make("label");
-        var label_pattern = ui.Pattern.init();
-        label_pattern.push(arena, .{ .sel = .{ .tag = label_tag } });
-        ui.styleMatchAfter(label_pattern, .{
-            .color = label_font_color,
-            .font = label_font.*,
-            .font_size = label_font_size,
-        });
-
-        var options = [_][]const u8{
-            "I",
-            "Am",
-            "Stylish",
-        };
-        var radio_group_info = ui.RadioGroupInfo{
-            .selected_index = styling_selected_radio,
-            .options = &options,
-        };
-        const result = ui.radioGroup("radio_group", &radio_group_info);
-        styling_selected_radio = result.selected_index;
-    }
-
-    {
-        ui.styleNext(.{ .layout = .{ .axis = .X, .spacing = 32 } });
-        _ = ui.boxBegin("controls", .{});
-        defer _ = ui.boxEnd();
-
-        {
-            ui.styleNext(.{ .layout = .{ .axis = .Y, .spacing = 16 } });
-            _ = ui.boxBegin("unselected", .{});
-            defer _ = ui.boxEnd();
-
-            ui.styleNext(.{ .font_size = 16 });
-            _ = ui.makeLabel("Radio style");
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("size", .{});
-                defer _ = ui.boxEnd();
-
-                var width_slider = (unselected_width - 8) / 16;
-                labeledSlider("Width", &width_slider);
-                unselected_width = 8 + width_slider * 16;
-
-                var height_slider = (unselected_height - 8) / 16;
-                labeledSlider("Height", &height_slider);
-                unselected_height = 8 + height_slider * 16;
-
-                var roundness_slider = (unselected_roundness - 4) / 8;
-                labeledSlider("Roundness", &roundness_slider);
-                unselected_roundness = 4 + roundness_slider * 8;
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("background", .{});
-                defer _ = ui.boxEnd();
-
-                labeledSlider("Background R", &unselected_bg_color.r);
-                labeledSlider("Background G", &unselected_bg_color.g);
-                labeledSlider("Background B", &unselected_bg_color.b);
-                labeledSlider("Background A", &unselected_bg_color.a);
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("border", .{});
-                defer _ = ui.boxEnd();
-
-                labeledSlider("Border R", &unselected_border_color.r);
-                labeledSlider("Border G", &unselected_border_color.g);
-                labeledSlider("Border B", &unselected_border_color.b);
-                labeledSlider("Border A", &unselected_border_color.a);
-            }
-
-            var border_size_slider = unselected_border_size / 5;
-            labeledSlider("Border size", &border_size_slider);
-            unselected_border_size = border_size_slider * 5;
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 10 } });
-                _ = ui.boxBegin("status_override", .{});
-                defer _ = ui.boxEnd();
-
-                _ = ui.makeLabel("Override");
-
-                var status_options = [_][]const u8{
-                    "Always",
-                    "When hovering",
-                    "When active",
-                };
-                var status_info = ui.RadioGroupInfo{
-                    .selected_index = unselected_status_index,
-                    .options = &status_options,
-                };
-                const status_result = ui.radioGroup("status", &status_info);
-                unselected_status_index = status_result.selected_index;
-                unselected_when_status = switch (unselected_status_index.?) {
-                    0 => .{},
-                    1 => .{ .hover = true },
-                    2 => .{ .active = true },
-                    else => unreachable,
-                };
-            }
-        }
-
-        {
-            ui.styleNext(.{ .layout = .{ .axis = .Y, .spacing = 16 } });
-            _ = ui.boxBegin("selected", .{});
-            defer _ = ui.boxEnd();
-
-            ui.styleNext(.{ .font_size = 16 });
-            _ = ui.makeLabel("Radio selected style");
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("size", .{});
-                defer _ = ui.boxEnd();
-
-                var width_slider = (selected_width - 8) / 16;
-                labeledSlider("Width", &width_slider);
-                selected_width = 8 + width_slider * 16;
-
-                var height_slider = (selected_height - 8) / 16;
-                labeledSlider("Height", &height_slider);
-                selected_height = 8 + height_slider * 16;
-
-                var roundness_slider = (selected_roundness - 4) / 8;
-                labeledSlider("Roundness", &roundness_slider);
-                selected_roundness = 4 + roundness_slider * 8;
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("color", .{});
-                defer _ = ui.boxEnd();
-
-                labeledSlider("Center R", &selected_center_color.r);
-                labeledSlider("Center G", &selected_center_color.g);
-                labeledSlider("Center B", &selected_center_color.b);
-                labeledSlider("Center A", &selected_center_color.a);
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 4 } });
-                _ = ui.boxBegin("background", .{});
-                defer _ = ui.boxEnd();
-
-                labeledSlider("Background R", &selected_bg_color.r);
-                labeledSlider("Background G", &selected_bg_color.g);
-                labeledSlider("Background B", &selected_bg_color.b);
-                labeledSlider("Background A", &selected_bg_color.a);
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .spacing = 10 } });
-                _ = ui.boxBegin("status_override", .{});
-                defer _ = ui.boxEnd();
-
-                ui.styleNext(.{ .size = .{ .height = .{ .pixels = 30 } } });
-                _ = ui.boxMake("spacer", .{});
-
-                _ = ui.makeLabel("Override");
-
-                var status_options = [_][]const u8{
-                    "Always",
-                    "When hovering",
-                    "When active",
-                };
-                var status_info = ui.RadioGroupInfo{
-                    .selected_index = selected_status_index,
-                    .options = &status_options,
-                };
-                const status_result = ui.radioGroup("status", &status_info);
-                selected_status_index = status_result.selected_index;
-                selected_when_status = switch (selected_status_index.?) {
-                    0 => .{},
-                    1 => .{ .hover = true },
-                    2 => .{ .active = true },
-                    else => unreachable,
-                };
-            }
-        }
-
-        {
-            ui.styleNext(.{ .layout = .{ .axis = .Y, .spacing = 10 } });
-            _ = ui.boxBegin("label", .{});
-            defer _ = ui.boxEnd();
-
-            ui.styleNext(.{ .font_size = 16 });
-            _ = ui.makeLabel("Label style");
-
-            {
-                ui.styleNext(.{ .layout = .{ .axis = .X, .spacing = 8 } });
-                _ = ui.boxBegin("font_color", .{});
-                defer _ = ui.boxEnd();
-
-                ui.styleMatchAfter(ui.Pattern.owner(), .{
-                    .size = .{ .width = .{ .pixels = 100 } },
-                });
-                _ = ui.makeLabel("Font color");
-
-                var color_names = [_][]const u8{
-                    "Default",
-                    "Red",
-                    "Orange",
-                    "Amber",
-                    "Yellow",
-                    "Lime",
-                    "Light green",
-                    "Green",
-                };
-                const colors = [_]oc.Color{
-                    ui.dark_theme.text0,
-                    ui.dark_theme.palette.red5,
-                    ui.dark_theme.palette.orange5,
-                    ui.dark_theme.palette.amber5,
-                    ui.dark_theme.palette.yellow5,
-                    ui.dark_theme.palette.lime5,
-                    ui.dark_theme.palette.light_green5,
-                    ui.dark_theme.palette.green5,
-                };
-                var color_info = ui.SelectPopupInfo{
-                    .selected_index = label_font_color_selected,
-                    .options = &color_names,
-                };
-                const color_result = ui.selectPopup("color", &color_info);
-                label_font_color_selected = color_result.selected_index;
-                label_font_color = colors[label_font_color_selected.?];
-            }
-
-            {
-                ui.styleNext(.{ .layout = .{ .axis = .X, .spacing = 8 } });
-                _ = ui.boxBegin("font", .{});
-                defer _ = ui.boxEnd();
-
-                ui.styleMatchAfter(ui.Pattern.owner(), .{
-                    .size = .{ .width = .{ .pixels = 100 } },
-                });
-                _ = ui.makeLabel("Font");
-
-                var font_names = [_][]const u8{
-                    "Regular",
-                    "Bold",
-                };
-                const fonts = [_]*oc.Font{
-                    &font_regular,
-                    &font_bold,
-                };
-                var font_info = ui.SelectPopupInfo{
-                    .selected_index = label_font_selected,
-                    .options = &font_names,
-                };
-                const font_result = ui.selectPopup("font_style", &font_info);
-                label_font_selected = font_result.selected_index;
-                label_font = fonts[label_font_selected.?];
-            }
-
-            var font_size_slider = (label_font_size - 8) / 16;
-            labeledSlider("Font size", &font_size_slider);
-            label_font_size = 8 + font_size_slider * 16;
-        }
-    }
+fn log_pushf(comptime fmt: []const u8, args: anytype) void {
+    var buf: [1024]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, fmt, args) catch @panic("OOM");
+    log_push(line);
 }
 
-fn columnBegin(header: []const u8, widthFraction: f32) void {
-    ui.styleNext(.{
-        .size = .{
-            .width = .{
-                .custom = .{ .kind = .Parent, .value = widthFraction, .relax = 1 },
-            },
-            .height = .fill_parent,
-        },
-        .layout = .{
-            .axis = .Y,
-            .margin = .{ .y = 8 },
-            .spacing = 24,
-        },
-        .bg_color = ui_ctx.theme.bg1,
-        .border_color = ui_ctx.theme.border,
-        .border_size = 1,
-        .roundness = ui_ctx.theme.roundness_small,
-    });
-    _ = ui.boxBegin(header, .{ .draw_background = true, .draw_border = true });
+fn log_push(line: []const u8) void {
+    oc.str8_list_push(&log_arena, &log_lines, oc.to_str8(@constCast(line)));
+}
+
+fn column_begin(header: [:0]const u8, widthFraction: f32) void {
+    _ = oc.ui_box_begin_str8(oc.to_str8(@constCast(header)));
+
+    oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = widthFraction, .relax = 1 }));
+    oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+    oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+    oc.ui_style_set_f32(.UI_MARGIN_Y, 8);
+    oc.ui_style_set_f32(.UI_SPACING, 24);
+    oc.ui_style_set_var_str8(.UI_BG_COLOR, oc.to_str8(@constCast("bg-1")));
+    oc.ui_style_set_var_str8(.UI_BORDER_COLOR, oc.to_str8(@constCast("border")));
+    oc.ui_style_set_f32(.UI_BORDER_SIZE, 1);
+    oc.ui_style_set_var_str8(.UI_ROUNDNESS, oc.to_str8(@constCast("roundness-small")));
+    oc.ui_style_set_i32(.UI_CONSTRAIN_Y, 1);
 
     {
-        ui.styleNext(.{
-            .size = .{ .width = .fill_parent },
-            .layout = .{ .alignment = .{ .x = .Center } },
-        });
-        _ = ui.boxBegin("header", .{});
-        defer _ = ui.boxEnd();
+        _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("header")));
+        defer _ = oc.ui_box_end();
 
-        ui.styleNext(.{ .font_size = 18 });
-        _ = ui.makeLabel(header);
+        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+        oc.ui_style_set_i32(.UI_ALIGN_X, @intFromEnum(oc.ui_align.UI_ALIGN_CENTER));
+
+        {
+            oc.ui_style_rule_begin(oc.to_str8(@constCast(".label")));
+            defer oc.ui_style_rule_end();
+
+            oc.ui_style_set_f32(.UI_TEXT_SIZE, 18);
+        }
+        _ = oc.ui_label(@constCast("label"), @constCast(header.ptr));
     }
 
-    ui.styleNext(.{
-        .size = .{
-            .width = .fill_parent,
-            .height = .{
-                .custom = .{ .kind = .Parent, .value = 1, .relax = 1 },
-            },
-        },
-        .layout = .{
-            .alignment = .{ .x = .Start },
-            .margin = .{ .x = 16 },
-            .spacing = 24,
-        },
-    });
-    _ = ui.boxBegin("contents", .{});
+    _ = oc.ui_box_begin_str8(oc.to_str8(@constCast("contents")));
+
+    oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1 }));
+    oc.ui_style_set_size(.UI_HEIGHT, ui_size(.{ .kind = .UI_SIZE_PARENT, .value = 1, .relax = 1 }));
+    oc.ui_style_set_i32(.UI_AXIS, @intFromEnum(oc.ui_axis.UI_AXIS_Y));
+    oc.ui_style_set_i32(.UI_ALIGN_X, @intFromEnum(oc.ui_align.UI_ALIGN_START));
+    oc.ui_style_set_f32(.UI_MARGIN_X, 16);
+    oc.ui_style_set_f32(.UI_SPACING, 24);
+    oc.ui_style_set_i32(.UI_CONSTRAIN_Y, 1);
 }
 
-fn columnEnd() void {
-    _ = ui.boxEnd(); // contents
-    _ = ui.boxEnd(); // column
+fn column_end() void {
+    _ = oc.ui_box_end(); // contents
+    _ = oc.ui_box_end(); // column
 }
 
-fn labeledSlider(label: []const u8, value: *f32) void {
-    ui.styleNext(.{ .layout = .{ .axis = .X, .spacing = 8 } });
-    _ = ui.boxBegin(label, .{});
-    defer _ = ui.boxEnd();
+fn labeled_slider(label: [:0]const u8, value: *f32) void {
+    _ = oc.ui_box_begin_str8(oc.to_str8(@constCast(label)));
+    defer _ = oc.ui_box_end();
 
-    ui.styleMatchAfter(ui.Pattern.owner(), .{
-        .size = .{ .width = .{ .pixels = 100 } },
-    });
-    _ = ui.makeLabel(label);
+    oc.ui_style_set_f32(.UI_SPACING, 8);
 
-    ui.styleNext(.{
-        .size = .{ .width = .{ .pixels = 100 } },
-    });
-    _ = ui.slider("slider", value);
+    {
+        oc.ui_style_rule_begin(oc.to_str8(@constCast("label")));
+        defer oc.ui_style_rule_end();
+
+        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 100 }));
+    }
+    _ = oc.ui_label(@constCast("label"), @constCast(label));
+
+    {
+        oc.ui_style_rule_begin(oc.to_str8(@constCast("slider")));
+        defer oc.ui_style_rule_end();
+
+        oc.ui_style_set_size(.UI_WIDTH, ui_size(.{ .kind = .UI_SIZE_PIXELS, .value = 100 }));
+    }
+    _ = oc.ui_slider(@constCast("slider"), value);
 }
 
-fn logPush(line: []const u8) void {
-    log_lines.push(&log_arena, line);
+fn oc_list_checked_entry(elt_ptr: ?*oc.list_elt, comptime T: type, comptime member: []const u8) ?*T {
+    return if (elt_ptr) |elt| @as(*T, @fieldParentPtr(member, elt)) else null;
 }
 
-fn logPushf(comptime fmt: []const u8, args: anytype) void {
-    const str = oc.Str8.pushf(&log_arena, fmt, args);
-    log_lines.push(&log_arena, str);
-}
-
-/// This makes sure the light theme doesn't break the styling overrides
-/// You won't need it in a real program as long as your colors come from ui_ctx.theme or ui_ctx.theme.palette
-fn resetNextRadioGroupToDarkTheme(arena: *oc.Arena) void {
-    const unselected_tag = ui.Tag.make("radio");
-    var unselected_pattern = ui.Pattern.init();
-    unselected_pattern.push(arena, .{ .sel = .{ .tag = unselected_tag } });
-    ui.styleMatchAfter(unselected_pattern, .{
-        .border_color = ui.dark_theme.text3,
-        .border_size = 1,
-    });
-
-    var unselected_hover_pattern = ui.Pattern.init();
-    unselected_hover_pattern.push(arena, .{ .sel = .{ .tag = unselected_tag } });
-    unselected_hover_pattern.push(arena, .{ .op = .And, .sel = .{ .status = .{ .hover = true } } });
-    ui.styleMatchAfter(unselected_hover_pattern, .{
-        .bg_color = ui.dark_theme.fill0,
-        .border_color = ui.dark_theme.primary,
-    });
-
-    var unselected_active_pattern = ui.Pattern.init();
-    unselected_active_pattern.push(arena, .{ .sel = .{ .tag = unselected_tag } });
-    unselected_active_pattern.push(arena, .{ .op = .And, .sel = .{ .status = .{ .active = true } } });
-    ui.styleMatchAfter(unselected_active_pattern, .{
-        .bg_color = ui.dark_theme.fill1,
-        .border_color = ui.dark_theme.primary,
-    });
-
-    const selected_tag = ui.Tag.make("radio_selected");
-    var selected_pattern = ui.Pattern.init();
-    selected_pattern.push(arena, .{ .sel = .{ .tag = selected_tag } });
-    ui.styleMatchAfter(selected_pattern, .{
-        .color = ui.dark_theme.palette.white,
-        .bg_color = ui.dark_theme.primary,
-    });
-
-    var selected_hover_pattern = ui.Pattern.init();
-    selected_hover_pattern.push(arena, .{ .sel = .{ .tag = selected_tag } });
-    selected_hover_pattern.push(arena, .{ .op = .And, .sel = .{ .status = .{ .hover = true } } });
-    ui.styleMatchAfter(selected_hover_pattern, .{
-        .bg_color = ui.dark_theme.primary_hover,
-    });
-
-    var selected_active_pattern = ui.Pattern.init();
-    selected_active_pattern.push(arena, .{ .sel = .{ .tag = selected_tag } });
-    selected_active_pattern.push(arena, .{ .op = .And, .sel = .{ .status = .{ .active = true } } });
-    ui.styleMatchAfter(selected_active_pattern, .{
-        .bg_color = ui.dark_theme.primary_active,
-    });
+fn ui_size(s: anytype) oc.ui_size {
+    return std.mem.zeroInit(oc.ui_size, s);
 }

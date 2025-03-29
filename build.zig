@@ -37,16 +37,23 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = "samples/zig-triangle/src/main.zig",
         },
         .{
-            .name = "Sample",
-            .root_source_file = "samples/zig-sample/src/main.zig",
-            .icon = "samples/zig-sample/icon.png",
-            .resource_dir = "samples/zig-sample/data",
+            .name = "Breakout",
+            .root_source_file = "samples/zig-breakout/src/main.zig",
+            .icon = "samples/zig-breakout/icon.png",
+            .resource_dir = "samples/zig-breakout/data",
         },
         .{
             .name = "UI",
             .root_source_file = "samples/zig-ui/src/main.zig",
             .resource_dir = "samples/zig-ui/data",
         },
+        // TODO: WIP translation
+        // .{
+        //     .name = "Sample",
+        //     .root_source_file = "samples/zig-sample/src/main.zig",
+        //     .icon = "samples/zig-sample/icon.png",
+        //     .resource_dir = "samples/zig-sample/data",
+        // },
     }) |sample| {
         // Module structure:
         //  root = src/orca.zig
@@ -55,7 +62,7 @@ pub fn build(b: *std.Build) !void {
 
         const app_wasm = b.addExecutable(.{
             .name = sample.name,
-            .root_source_file = b.path("src/orca.zig"),
+            .root_source_file = b.path("src/orca2.zig"), // TODO: replace orca.zig
             .target = wasm_target,
             .optimize = optimize,
         });
@@ -102,7 +109,7 @@ pub fn build(b: *std.Build) !void {
         const gen_api = b.addExecutable(.{
             .name = "gen-api",
             .root_source_file = b.path("scripts/gen_api.zig"),
-            .target = b.host,
+            .target = b.graph.host,
             .optimize = .Debug,
         });
 
@@ -114,7 +121,7 @@ pub fn build(b: *std.Build) !void {
         }
         const gen_output = run_gen.addOutputFileArg("out.zig"); // TODO temporary path
 
-        const copy_output = b.addWriteFiles();
+        const copy_output = b.addUpdateSourceFiles();
         copy_output.addCopyFileToSource(gen_output, "out.zig");
 
         // api_step.dependOn(&copy_output.step);

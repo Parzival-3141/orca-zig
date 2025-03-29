@@ -3,17 +3,17 @@ const oc = @import("root");
 
 const lerp = std.math.lerp;
 
-const Vec2 = oc.Vec2;
-const Mat2x3 = oc.Mat2x3;
-const Str8 = oc.Str8;
+const Vec2 = oc.vec2;
+const Mat2x3 = oc.mat2x3;
+const Str8 = oc.str8;
 
 var allocator = std.heap.wasm_allocator;
 
-var surface: oc.Surface = undefined;
-var canvas: oc.Canvas = undefined;
-var font: oc.Font = undefined;
-var orca_image: oc.Image = undefined;
-var gradient_image: oc.Image = undefined;
+var surface: oc.surface = undefined;
+var canvas: struct { ctx: oc.canvas_context, renderer: oc.canvas_renderer } = undefined;
+var font: oc.font = undefined;
+var orca_image: oc.image = undefined;
+var gradient_image: oc.image = undefined;
 
 var counter: u32 = 0;
 var last_seconds: f64 = 0;
@@ -22,44 +22,42 @@ var frame_size: Vec2 = .{ .x = 0, .y = 0 };
 var rotation_demo: f32 = 0;
 
 pub fn onInit() !void {
-    oc.windowSetTitle("zig sample");
-    oc.windowSetSize(Vec2{ .x = 480, .y = 640 });
+    oc.window_set_title(oc.to_str8(@constCast("zig sample")));
+    oc.window_set_size(.{ .x = 480, .y = 640 });
 
-    oc.log.info("current platform: {}", .{oc.getHostPlatform()}, @src());
+    canvas.renderer = oc.canvas_renderer_create();
+    surface = oc.canvas_surface_create(canvas.renderer);
 
-    surface = oc.Surface.canvas();
-    canvas = oc.Canvas.create();
+    const scale = oc.surface_contents_scaling(surface);
+    oc.log.info("surface scaling: {d:.2} {d:.2}", .{ scale.x, scale.y }, @src());
 
-    const surface_scaling = surface.contentsScaling();
-    oc.log.info("surface scaling: {d:.2} {d:.2}", .{ surface_scaling.x, surface_scaling.y }, @src());
+    oc.assert(oc.canvas_renderer_is_nil(oc.canvas_renderer_nil()), "nil canvas should be nil", .{}, @src());
+    oc.assert(!oc.canvas_renderer_is_nil(canvas.renderer), "created canvas should not be nil", .{}, @src());
 
-    oc.assert(oc.Canvas.nil().isNil() == true, "nil canvas should be nil", .{}, @src());
-    oc.assert(canvas.isNil() == false, "created canvas should not be nil", .{}, @src());
+    const ranges = [5]oc.unicode_range{
+        .{ .firstCodePoint = 0x0000, .count = 127 }, // BASIC_LATIN
+        .{ .firstCodePoint = 0x0080, .count = 127 }, // C1_CONTROLS_AND_LATIN_1_SUPPLEMENT
+        .{ .firstCodePoint = 0x0100, .count = 127 }, // LATIN_EXTENDED_A
+        .{ .firstCodePoint = 0x0180, .count = 207 }, // LATIN_EXTENDED_B
+        .{ .firstCodePoint = 0xfff0, .count = 15 }, //  SPECIALS
+    };
+    font = oc.font_create_from_path(oc.to_str8(@constCast("/zig.ttf")), ranges.len, @constCast(&ranges));
+    oc.assert(oc.font_is_nil(oc.font_nil()), "nil font should be nil", .{}, @src());
+    oc.assert(!oc.font_is_nil(font), "created font should not be nil", .{}, @src());
 
-    const ranges = oc.UnicodeRange.range(&[_]oc.UnicodeRange.Enum{
-        .BasicLatin,
-        .C1ControlsAndLatin1Supplement,
-        .LatinExtendedA,
-        .LatinExtendedB,
-        .Specials,
-    });
-    font = oc.Font.createFromPath("/zig.ttf", &ranges);
-    oc.assert(oc.Font.nil().isNil() == true, "nil font should be nil", .{}, @src());
-    oc.assert(font.isNil() == false, "created font should not be nil", .{}, @src());
-
-    orca_image = oc.Image.createFromPath(surface, "/orca_jumping.jpg", .NoFlip);
-    oc.assert(oc.Image.nil().isNil() == true, "nil image should be nil", .{}, @src());
-    oc.assert(orca_image.isNil() == false, "created image should not be nil", .{}, @src());
+    orca_image = oc.image_create_from_path(canvas.renderer, oc.to_str8(@constCast("/orca_jumping.jpg")), false);
+    oc.assert(oc.image_is_nil(oc.image_nil()), "nil image should be nil", .{}, @src());
+    oc.assert(!oc.image_is_nil(orca_image), "created image should not be nil", .{}, @src());
 
     // generate a gradient and upload it to an image
     {
         const width = 256;
         const height = 128;
 
-        const tl = oc.Color{ .r = 70.0 / 255.0, .g = 13.0 / 255.0, .b = 108.0 / 255.0 };
-        const bl = oc.Color{ .r = 251.0 / 255.0, .g = 167.0 / 255.0, .b = 87.0 / 255.0 };
-        const tr = oc.Color{ .r = 48.0 / 255.0, .g = 164.0 / 255.0, .b = 219.0 / 255.0 };
-        const br = oc.Color{ .r = 151.0 / 255.0, .g = 222.0 / 255.0, .b = 150.0 / 255.0 };
+        const tl: oc.color = .{ .r = 70.0 / 255.0, .g = 13.0 / 255.0, .b = 108.0 / 255.0, .a = 0, .colorSpace = .COLOR_SPACE_RGB };
+        const bl: oc.color = .{ .r = 251.0 / 255.0, .g = 167.0 / 255.0, .b = 87.0 / 255.0, .a = 0, .colorSpace = .COLOR_SPACE_RGB };
+        const tr: oc.color = .{ .r = 48.0 / 255.0, .g = 164.0 / 255.0, .b = 219.0 / 255.0, .a = 0, .colorSpace = .COLOR_SPACE_RGB };
+        const br: oc.color = .{ .r = 151.0 / 255.0, .g = 222.0 / 255.0, .b = 150.0 / 255.0, .a = 0, .colorSpace = .COLOR_SPACE_RGB };
 
         var pixels: [width * height]u32 = undefined;
         for (0..height) |y| {
@@ -74,37 +72,44 @@ pub fn onInit() !void {
                 const tr_weight = x_norm * (1 - y_norm);
                 const br_weight = x_norm * y_norm;
 
-                const r: f32 = tl_weight * tl.r + bl_weight * bl.r + tr_weight * tr.r + br_weight * br.r;
-                const g: f32 = tl_weight * tl.g + bl_weight * bl.g + tr_weight * tr.g + br_weight * br.g;
-                const b: f32 = tl_weight * tl.b + bl_weight * bl.b + tr_weight * tr.b + br_weight * br.b;
-                const color = oc.Color{ .r = r, .g = g, .b = b, .a = 1.0 };
-                pixels[y * width + x] = color.toRgba8();
+                const color = oc.color_rgba(
+                    tl_weight * tl.r + bl_weight * bl.r + tr_weight * tr.r + br_weight * br.r,
+                    tl_weight * tl.g + bl_weight * bl.g + tr_weight * tr.g + br_weight * br.g,
+                    tl_weight * tl.b + bl_weight * bl.b + tr_weight * tr.b + br_weight * br.b,
+                    1,
+                );
+                pixels[y * width + x] = packRgba8(color);
             }
         }
 
-        gradient_image = oc.Image.create(surface, width, height);
-        gradient_image.uploadRegionRgba8(oc.Rect.xywh(0, 0, width, height), @ptrCast((&pixels).ptr));
-
-        var tmp_image = oc.Image.create(surface, width, height);
-        tmp_image.uploadRegionRgba8(oc.Rect.xywh(0, 0, width, height), @ptrCast((&pixels).ptr));
-        tmp_image.destroy();
-        tmp_image = oc.Image.nil();
+        gradient_image = oc.image_create_from_rgba8(canvas.renderer, width, height, @ptrCast(&pixels));
     }
 
     try testFileApis();
 }
 
+/// pack 0-1 RGBAf32 color into a u32
+fn packRgba8(color: oc.color) u32 {
+    var result: u32 = 0;
+    const c = &color;
+    result |= @as(u32, @intFromFloat(c.r * 255.0)) << 0;
+    result |= @as(u32, @intFromFloat(c.g * 255.0)) << 8;
+    result |= @as(u32, @intFromFloat(c.b * 255.0)) << 16;
+    result |= @as(u32, @intFromFloat(c.a * 255.0)) << 24;
+    return result;
+}
+
 pub fn onResize(width: u32, height: u32) void {
-    frame_size = Vec2{ .x = @floatFromInt(width), .y = @floatFromInt(height) };
-    const surface_size = surface.getSize();
+    frame_size = .{ .x = @floatFromInt(width), .y = @floatFromInt(height) };
+    const surface_size = oc.surface_get_size(surface);
     oc.log.info("frame resize: {d:.2}, {d:.2}, surface size: {d:.2} {d:.2}", .{ frame_size.x, frame_size.y, surface_size.x, surface_size.y }, @src());
 }
 
-pub fn onMouseDown(button: oc.MouseButton) void {
+pub fn onMouseDown(button: oc.mouse_button) void {
     oc.log.info("mouse down! {}", .{button}, @src());
 }
 
-pub fn onMouseUp(button: oc.MouseButton) void {
+pub fn onMouseUp(button: oc.mouse_button) void {
     oc.log.info("mouse up! {}", .{button}, @src());
 }
 
@@ -112,19 +117,19 @@ pub fn onMouseWheel(dx: f32, dy: f32) void {
     oc.log.info("mouse wheel! dx: {d:.2}, dy: {d:.2}", .{ dx, dy }, @src());
 }
 
-pub fn onKeyDown(scan: oc.ScanCode, key: oc.KeyCode) void {
+pub fn onKeyDown(scan: oc.scan_code, key: oc.key_code) void {
     oc.log.info("key down: {} {}", .{ scan, key }, @src());
 }
 
-pub fn onKeyUp(scan: oc.ScanCode, key: oc.KeyCode) void {
-    oc.log.info("key up: {} {}", .{ scan, key }, @src());
+pub fn onKeyUp(scan: oc.scan_code, key: oc.key_code) void {
+    oc.log.info("key up: {s} {s}", .{ @tagName(scan), @tagName(key) }, @src());
 
     switch (key) {
-        oc.KeyCode.Escape => oc.requestQuit(),
-        oc.KeyCode.B => oc.abort("aborting", .{}, @src()),
-        oc.KeyCode.A => oc.assert(false, "test assert failed", .{}, @src()),
-        oc.KeyCode.W => oc.log.warn("logging a test warning", .{}, @src()),
-        oc.KeyCode.E => oc.log.err("logging a test error", .{}, @src()),
+        .KEY_ESCAPE => oc.request_quit(),
+        .KEY_B => oc.abort("aborting", .{}, @src()),
+        .KEY_A => oc.assert(false, "test assert failed", .{}, @src()),
+        .KEY_W => oc.log.warn("logging a test warning", .{}, @src()),
+        .KEY_E => oc.log.err("logging a test error", .{}, @src()),
         else => {},
     }
 }
@@ -132,87 +137,97 @@ pub fn onKeyUp(scan: oc.ScanCode, key: oc.KeyCode) void {
 pub fn onFrameRefresh() !void {
     counter += 1;
 
-    const secs: f64 = oc.clock.time(.Date);
+    const secs: f64 = oc.ui_frame_time();
 
     if (last_seconds != @floor(secs)) {
         last_seconds = @floor(secs);
         oc.log.info("seconds since Jan 1, 1970: {d:.0}", .{secs}, @src());
     }
 
-    _ = canvas.select();
+    _ = oc.canvas_context_select(canvas.ctx);
 
     {
-        const c1 = oc.Color{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0 };
-        const c2 = oc.Color{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0 };
-        oc.Canvas.setColorRgba(c1.r, c1.g, c1.b, c1.a);
-        oc.assert(std.meta.eql(oc.Canvas.getColor(), c1), "color should be what we set", .{}, @src());
-        oc.Canvas.setColor(c2);
-        oc.assert(std.meta.eql(oc.Canvas.getColor(), c2), "color should be what we set", .{}, @src());
-        oc.Canvas.clear();
+        const c1: oc.color = .{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0, .colorSpace = .COLOR_SPACE_RGB };
+        const c2: oc.color = .{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0, .colorSpace = .COLOR_SPACE_RGB };
+        oc.set_color_rgba(c1.r, c1.g, c1.b, c1.a);
+        oc.assert(std.meta.eql(oc.get_color(), c1), "color should be what we set", .{}, @src());
+        oc.set_color(c2);
+        oc.assert(std.meta.eql(oc.get_color(), c2), "color should be what we set", .{}, @src());
+        oc.clear();
 
-        oc.Canvas.setTolerance(1);
-        oc.assert(oc.Canvas.getTolerance() == 1, "tolerance should be 1", .{}, @src());
-        oc.Canvas.setJoint(.Bevel);
-        oc.assert(oc.Canvas.getJoint() == .Bevel, "joint should be what we set", .{}, @src());
-        oc.Canvas.setCap(.Square);
-        oc.assert(oc.Canvas.getCap() == .Square, "cap should be what we set", .{}, @src());
+        oc.set_tolerance(1);
+        oc.assert(oc.get_tolerance() == 1, "tolerance should be 1", .{}, @src());
+        oc.set_joint(.JOINT_BEVEL);
+        oc.assert(oc.get_joint() == .JOINT_BEVEL, "joint should be what we set", .{}, @src());
+        oc.set_cap(.CAP_SQUARE);
+        oc.assert(oc.get_cap() == .CAP_SQUARE, "cap should be what we set", .{}, @src());
     }
 
     {
-        const translation: Mat2x3 = .{ .m = [_]f32{ 1, 0, 50, 0, 1, 50 } };
-        Mat2x3.push(translation);
-        defer Mat2x3.pop();
+        const translation: oc.mat2x3 = .{ .m = [_]f32{ 1, 0, 50, 0, 1, 50 } };
+        oc.matrix_push(translation);
+        defer oc.matrix_pop();
 
-        oc.assert(std.meta.eql(Mat2x3.top(), translation), "top of matrix stack should be what we pushed", .{}, @src());
-        oc.Canvas.setWidth(1);
-        oc.assert(oc.Canvas.getWidth() == 1, "width should be 1", .{}, @src());
-        oc.Canvas.rectangleFill(50, 0, 10, 10);
-        oc.Canvas.rectangleStroke(70, 0, 10, 10);
-        oc.Canvas.roundedRectangleFill(90, 0, 10, 10, 3);
-        oc.Canvas.roundedRectangleStroke(110, 0, 10, 10, 3);
+        oc.assert(std.meta.eql(oc.matrix_top(), translation), "top of matrix stack should be what we pushed", .{}, @src());
+        oc.set_width(1);
+        oc.assert(oc.get_width() == 1, "width should be 1", .{}, @src());
+        oc.rectangle_fill(50, 0, 10, 10);
+        oc.rectangle_stroke(70, 0, 10, 10);
+        oc.rounded_rectangle_fill(90, 0, 10, 10, 3);
+        oc.rounded_rectangle_stroke(110, 0, 10, 10, 3);
 
-        const green = oc.Color{ .r = 0.05, .g = 1, .b = 0.05, .a = 1 };
-        oc.Canvas.setColor(green);
-        oc.assert(std.meta.eql(oc.Canvas.getColor(), green), "color should be green", .{}, @src());
+        const green: oc.color = .{ .r = 0.05, .g = 1, .b = 0.05, .a = 1, .colorSpace = .COLOR_SPACE_RGB };
+        oc.set_color(green);
 
-        oc.Canvas.ellipseFill(140, 5, 10, 5);
-        oc.Canvas.ellipseStroke(170, 5, 10, 5);
-        oc.Canvas.circleFill(195, 5, 5);
-        oc.Canvas.circleStroke(215, 5, 5);
+        oc.ellipse_fill(140, 5, 10, 5);
+        oc.ellipse_stroke(170, 5, 10, 5);
+        oc.circle_fill(195, 5, 5);
+        oc.circle_stroke(215, 5, 5);
 
-        oc.Canvas.arc(235, 5, 5, std.math.pi, 0);
-        oc.Canvas.stroke();
+        oc.arc(235, 5, 5, std.math.pi, 0);
+        oc.stroke();
 
-        oc.Canvas.arc(260, 5, 5, std.math.pi, 0);
-        oc.Canvas.fill();
+        oc.arc(260, 5, 5, std.math.pi, 0);
+        oc.fill();
 
-        oc.Canvas.moveTo(0, 0);
-        oc.assert(std.meta.eql(Vec2.zero(), oc.Canvas.getPosition()), "pos should be zero after moving there", .{}, @src());
+        oc.move_to(0, 0);
+        oc.assert(std.meta.eql(oc.vec2{ .x = 0, .y = 0 }, oc.get_position()), "pos should be zero after moving there", .{}, @src());
     }
 
     {
         rotation_demo += 0.03;
 
-        const rot = Mat2x3.rotate(rotation_demo);
-        const trans = Mat2x3.translate(335, 55);
-        Mat2x3.push(Mat2x3.mulM(trans, rot));
-        defer Mat2x3.pop();
+        const rot = oc.mat2x3_rotate(rotation_demo);
+        const trans = oc.mat2x3_translate(335, 55);
+        oc.matrix_push(oc.mat2x3_mul_m(trans, rot));
+        defer oc.matrix_pop();
 
-        oc.Canvas.rectangleFill(-5, -5, 10, 10);
+        oc.rectangle_fill(-5, -5, 10, 10);
     }
 
     {
-        var scratch_scope = oc.Arena.scratchBegin();
-        defer scratch_scope.end();
+        const scratch_scope = oc.scratch_begin();
+        defer oc.arena_scope_end(scratch_scope);
 
-        const scratch: *oc.Arena = scratch_scope.arena;
+        const scratch: *oc.arena = scratch_scope.arena;
 
-        const str1: []const u8 = Str8.collate(scratch, &[_][]const u8{ "Hello", "from", "Zig!" }, ">> ", " ", " <<");
+        const str1: []const u8 = oc.str8_list_collate(
+            scratch,
+            &[_][]const u8{ "Hello", "from", "Zig!" },
+            ">> ",
+            " ",
+            " <<",
+        );
 
-        var str2_list = oc.Str8List.init();
-        str2_list.pushStr(scratch, Str8.fromSlice("All"));
-        str2_list.pushf(scratch, "your", .{});
-        str2_list.push(scratch, "base!!");
+        var str2_list: oc.str8_list = .{
+            .list = undefined,
+            .eltCount = 0,
+            .len = 0,
+        };
+        oc.list_init(&str2_list.list);
+
+        oc.str8_list_push(scratch, &str2_list, oc.to_str8(@constCast("All")));
+        str2_list.pushf(scratch, &str2_list, "your %s", "base!!");
 
         oc.assert(str2_list.contains("All"), "str2_list should have the string we just pushed", .{}, @src());
 
@@ -242,14 +257,14 @@ pub fn onFrameRefresh() !void {
         Mat2x3.push(Mat2x3.translate(text_begin_x, 100));
         defer Mat2x3.pop();
 
-        oc.Canvas.setColorRgba(1.0, 0.05, 0.05, 1.0);
-        oc.Canvas.setFont(font);
-        oc.Canvas.setFontSize(font_size);
-        oc.Canvas.moveTo(0, 0);
-        oc.Canvas.textOutlines(str1);
-        oc.Canvas.moveTo(0, 35);
-        oc.Canvas.textOutlines(str2);
-        oc.Canvas.fill();
+        oc.set_color_rgba(1.0, 0.05, 0.05, 1.0);
+        oc.set_font(font);
+        oc.set_font_size(font_size);
+        oc.move_to(0, 0);
+        oc.text_outlines(str1);
+        oc.move_to(0, 35);
+        oc.text_outlines(str2);
+        oc.fill();
     }
 
     {
@@ -279,10 +294,10 @@ pub fn onFrameRefresh() !void {
         var strings: oc.Str8List = Str8.split(big_string.slice(), scratch, &separators);
         const collated: []const u8 = strings.join(scratch);
 
-        oc.Canvas.setFontSize(12);
-        oc.Canvas.moveTo(0, 170);
-        oc.Canvas.textOutlines(collated);
-        oc.Canvas.fill();
+        oc.set_font_size(12);
+        oc.move_to(0, 170);
+        oc.text_outlines(collated);
+        oc.fill();
     }
 
     {
@@ -344,7 +359,7 @@ fn testFileApis() !void {
     oc.assert(try orca_jumping_file.getSize() > 0, "size API works", .{}, @src());
     oc.assert(orca_jumping_file.isNil() == false, "file should be valid", .{}, @src());
 
-    var tmp_image = oc.Image.createFromFile(surface, orca_jumping_file, .NoFlip);
+    var tmp_image = oc.image.createFromFile(surface, orca_jumping_file, .NoFlip);
     oc.assert(tmp_image.isNil() == false, "image loaded from file should not be nil", .{}, @src());
     tmp_image.destroy();
     orca_jumping_file.close();
