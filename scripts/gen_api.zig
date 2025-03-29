@@ -11,12 +11,30 @@ const AnyWriter = std.io.AnyWriter;
 // - specify pointer types (single/multi-item, nullable, mutable, etc...)
 // - change module brief to doc for consistency
 // - remove unnamed enums, create a dedicated "constant" kind instead
+// - missing OC_UNICODE_RANGE values
+// - missing oc_clock_time
 // - make OC_UI_STYLE a proper enum
 // - oc_pool and oc_window are missing typename entries
 // - oc_ui_box is duplicated
 // - OC_OC_IO_ERROR typo?
 // - flag enum types should be differentiated from normal enums
 // - flag enum types should use the correct backing values (i.e. oc_file_open_flags_enum should use u16 not u32)
+
+// TODO using @constCast all the time is annoying and error prone.
+// Instead default [*c]u8 pointers to [*:0]const u8 and check against an exceptions list in Quirks.
+
+// NEW PLAN !!!
+// NEW PLAN !!!
+// NEW PLAN !!!
+// NEW PLAN !!!
+// We're gonna maintain the bindings manually. This will result in a higher quality API in exchange for more work upfront.
+// However the bindings will still use api.json as a ground truth, targeting a specific version/commit. Whenever api.json is
+// updated you can use the diff from the current version to perform updates.
+
+// By using api.json in favor of orca.h, we're able to upstream any improvements that aide in creating idiomatic bindings,
+// benefitting other consumers/binding projects as well.
+
+// Doing it this way eases maintenance (incremental patches, clear update path, can add CI) and improves API quality for everyone.
 
 const Kind = enum {
     @"enum",
@@ -95,7 +113,6 @@ pub fn main() !u8 {
     var bw = std.io.bufferedWriter(output.writer());
     const writer = bw.writer();
 
-    // TODO: parse json tokens directly instead of parsing nested Value types
     for (api.array.items) |module| {
         assert(expectKind(module.object) == .module);
         try handleModule(module.object, writer.any(), 0);
@@ -317,12 +334,20 @@ fn handleType(_type: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!v
             // ?*anyopaque
 
             // TODO: resolve C pointers
-            // If a pointer's subtype is a u8, make it a [*c]const u8.
             // If a pointer's subtype is an opaque type, make it a ?*subtype.
+            // How can we determine const-ness? i.e. [*c]const u8.
+            // How can we determine nullability?
 
             const subtype = expectField(_type, "type");
-            try writer.writeAll("[*c]");
-            try handleType(subtype.object, writer, depth);
+            const subkind = expectKind(subtype.object);
+
+            switch (subkind) {
+                .void => try writer.writeAll("?*anyopaque"),
+                else => {
+                    try writer.writeAll("[*c]");
+                    try handleType(subtype.object, writer, depth);
+                },
+            }
         },
         .proc => try handleProc(_type, writer, depth),
         .@"struct", .@"union" => {
@@ -357,6 +382,7 @@ fn handleType(_type: json.ObjectMap, writer: AnyWriter, depth: u32) WriteError!v
                     try writer.print("unnamed_{d}: ", .{unnamed});
                     unnamed += 1;
                 } else {
+                    // TODO: set default values to std.mem.zeroes(field_type)
                     try writer.print("{s}: ", .{fmtNameAliasingKeyword(field_name.string)});
                 }
                 try handleType(field_type.object, writer, 1 + depth);
@@ -512,8 +538,11 @@ const Quirks = struct {
             const vec_struct = expectField(_type, "fields").array.items[0].object;
             assert(strEql(expectField(vec_struct, "name").string, ""));
 
+            const vec_type = expectField(vec_struct, "type").object;
+            assert(expectKind(vec_type) == .@"struct");
+
             try writer.print("pub const {s} = ", .{fmtDeclName(name)});
-            try handleType(expectField(vec_struct, "type").object, writer, depth);
+            try handleType(vec_type, writer, depth);
             try writer.writeByte(';');
 
             return true;
@@ -521,8 +550,8 @@ const Quirks = struct {
 
         if (strEql(name, "oc_rect")) {
             assert(expectKind(_type) == .@"union");
-            const xy_wh = expectField(_type, "fields").array.items[1].object;
-            const subtype = expectField(xy_wh, "type").object;
+            const xywh_fields = expectField(_type, "fields").array.items[0].object;
+            const subtype = expectField(xywh_fields, "type").object;
             assert(expectKind(subtype) == .@"struct");
 
             try writer.print("pub const {s} = ", .{fmtDeclName(name)});
@@ -535,6 +564,50 @@ const Quirks = struct {
         if (strEql(name, "oc_ui_box")) {
             assert(expectKind(_type) == .@"struct");
             return _type.get("fields") == null;
+        }
+
+        if (strEql(name, "oc_color")) {
+            assert(expectKind(_type) == .@"struct");
+            const color_fields = expectField(_type, "fields").array;
+
+            const rgba_union = expectField(color_fields.items[0].object, "type").object;
+            assert(expectKind(rgba_union) == .@"union");
+
+            const rgba_union_fields = expectField(rgba_union, "fields").array;
+            const rgba_struct = expectField(rgba_union_fields.items[0].object, "type").object;
+            assert(expectKind(rgba_struct) == .@"struct");
+
+            const rgba_struct_fields = expectField(rgba_struct, "fields").array;
+
+            const color_space = color_fields.items[1].object;
+            assert(strEql(expectField(color_space, "name").string, "colorSpace"));
+
+            var combined_fields: [5]json.ObjectMap = undefined;
+            for (combined_fields[0..4], rgba_struct_fields.items[0..4]) |*dst, src| dst.* = src.object;
+            combined_fields[4] = color_space;
+
+            try writer.print("pub const {s} = extern struct {{\n", .{fmtDeclName(name)});
+
+            // @Cleanup duplicated code
+            for (combined_fields) |field| {
+                const field_name = expectField(field, "name");
+                const field_type = expectField(field, "type");
+
+                try writer.writeByteNTimes(' ', (1 + depth) * 4);
+                if (field.get("doc")) |doc| {
+                    try handleDocComment(doc, writer, depth + 1);
+                }
+
+                assert(field_name.string.len > 0);
+                try writer.print("{s}: ", .{fmtNameAliasingKeyword(field_name.string)});
+                try handleType(field_type.object, writer, 1 + depth);
+                try writer.writeAll(",\n");
+            }
+
+            try writer.writeByteNTimes(' ', depth * 4);
+            try writer.writeAll("};");
+
+            return true;
         }
 
         return false;
