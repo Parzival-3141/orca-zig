@@ -61,22 +61,22 @@ const user_root = @import("user_root");
 
 // TODO: document callbacks
 comptime {
-    exportCallback("onInit", "oc_on_init");
-    exportCallback("onMouseDown", "oc_on_mouse_down");
-    exportCallback("onMouseUp", "oc_on_mouse_up");
-    exportCallback("onMouseEnter", "oc_on_mouse_enter");
-    exportCallback("onMouseLeave", "oc_on_mouse_leave");
-    exportCallback("onMouseMove", "oc_on_mouse_move");
-    exportCallback("onMouseWheel", "oc_on_mouse_wheel");
-    exportCallback("onKeyDown", "oc_on_key_down");
-    exportCallback("onKeyUp", "oc_on_key_up");
-    exportCallback("onFrameRefresh", "oc_on_frame_refresh");
-    exportCallback("onResize", "oc_on_resize");
-    exportCallback("onRawEvent", "oc_on_raw_event");
-    exportCallback("onTerminate", "oc_on_terminate");
+    maybeExportCallback("onInit", "oc_on_init");
+    maybeExportCallback("onMouseDown", "oc_on_mouse_down");
+    maybeExportCallback("onMouseUp", "oc_on_mouse_up");
+    maybeExportCallback("onMouseEnter", "oc_on_mouse_enter");
+    maybeExportCallback("onMouseLeave", "oc_on_mouse_leave");
+    maybeExportCallback("onMouseMove", "oc_on_mouse_move");
+    maybeExportCallback("onMouseWheel", "oc_on_mouse_wheel");
+    maybeExportCallback("onKeyDown", "oc_on_key_down");
+    maybeExportCallback("onKeyUp", "oc_on_key_up");
+    maybeExportCallback("onFrameRefresh", "oc_on_frame_refresh");
+    maybeExportCallback("onResize", "oc_on_resize");
+    maybeExportCallback("onRawEvent", "oc_on_raw_event");
+    maybeExportCallback("onTerminate", "oc_on_terminate");
 }
 
-fn exportCallback(comptime handler: []const u8, comptime callback: []const u8) void {
+fn maybeExportCallback(comptime handler: []const u8, comptime callback: []const u8) void {
     if (@hasDecl(user_root, handler)) {
         const func = &@field(@This(), callback);
         @export(func, .{ .name = callback });
@@ -136,10 +136,23 @@ fn oc_on_terminate() callconv(.C) void {
 }
 
 fn callHandler(func: anytype, params: anytype, source: std.builtin.SourceLocation) void {
-    switch (@typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?)) {
+    const ReturnType = @typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?);
+
+    switch (ReturnType) {
         .void => @call(.auto, func, params),
-        .error_union => @call(.auto, func, params) catch |e|
-            debug.abort("Caught error: {}", .{e}, source), // @Incomplete error return trace
-        else => @compileError("Orca event handler must have void return type"),
+        .error_union => |eu| {
+            if (eu.payload != void)
+                @compileError("Orca event handlers must have a void return type");
+
+            @call(.auto, func, params) catch |err| {
+                debug.log.err("{s}", .{@errorName(err)}, source);
+                if (@errorReturnTrace()) |trace| {
+                    // debug.log.err("{s}", .{@errorName(err)}, source);
+                    std.debug.dumpStackTrace(trace.*);
+                }
+                debug.abort("Caught error: {}", .{err}, source); // @Incomplete error return trace
+            };
+        },
+        else => @compileError("Orca event handlers must have a void return type"),
     }
 }
