@@ -136,23 +136,72 @@ fn oc_on_terminate() callconv(.C) void {
 }
 
 fn callHandler(func: anytype, params: anytype, source: std.builtin.SourceLocation) void {
+    const bad_return_type = "Orca event handlers must have a return type of 'void' or '!void'";
     const ReturnType = @typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?);
+
+    const CustomStackTrace = struct {
+        inner: *std.builtin.StackTrace,
+
+        pub fn format(
+            self: @This(),
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = writer; // autofix
+            if (fmt.len != 0) std.fmt.invalidFmtError(fmt, self);
+            _ = options;
+
+            // const debug_info = std.debug.getSelfDebugInfo() catch |err| {
+            //     return writer.print("\nUnable to print stack trace: Unable to open debug info: {s}\n", .{@errorName(err)});
+            // };
+
+            // std.debug.StackIterator.init().next()
+
+            // try writer.writeAll("\n");
+            // std.debug.writeStackTrace(self.inner.*, writer, debug_info, .no_color) catch |err| {
+            //     try writer.print("Unable to print stack trace: {s}\n", .{@errorName(err)});
+            // };
+        }
+    };
 
     switch (ReturnType) {
         .void => @call(.auto, func, params),
         .error_union => |eu| {
-            if (eu.payload != void)
-                @compileError("Orca event handlers must have a void return type");
+            if (eu.payload != void) @compileError(bad_return_type);
 
             @call(.auto, func, params) catch |err| {
-                debug.log.err("{s}", .{@errorName(err)}, source);
+                @branchHint(.unlikely);
+                // @Incomplete error return trace
+
+                var buf: [1024]u8 = undefined;
+                var fba = std.heap.FixedBufferAllocator.init(&buf);
+
+                const builtin = @import("builtin");
+
+                var dwf: std.debug.Dwarf = .{
+                    .is_macho = false,
+                    .endian = builtin.cpu.arch.endian(),
+                };
+                dwf.open(fba.allocator()) catch @panic("uh oh");
+
+                // std.debug.StackIterator.init(first_address: ?usize, fp: ?usize)
+
+                // debug.log.err("{s}", .{@errorName(err)}, source);
+                // if (@errorReturnTrace()) |trace| {
+                //     std.debug.dumpStackTrace(trace.*);
+                // }
                 if (@errorReturnTrace()) |trace| {
-                    // debug.log.err("{s}", .{@errorName(err)}, source);
-                    std.debug.dumpStackTrace(trace.*);
+                    debug.abort(
+                        "Caught error: {}\n{}",
+                        .{ err, CustomStackTrace{ .inner = trace } },
+                        source,
+                    );
+                } else {
+                    debug.abort("Caught error: {}", .{err}, source);
                 }
-                debug.abort("Caught error: {}", .{err}, source); // @Incomplete error return trace
             };
         },
-        else => @compileError("Orca event handlers must have a void return type"),
+        else => @compileError(bad_return_type),
     }
 }
