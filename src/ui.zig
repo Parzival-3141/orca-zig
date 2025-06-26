@@ -210,6 +210,14 @@ pub const Size = extern struct {
     relax: f32 = 0,
     minSize: f32 = 0,
 
+    pub fn parent(value: f32) Size {
+        return .{ .kind = .parent, .value = value };
+    }
+
+    pub fn pixels(value: f32) Size {
+        return .{ .kind = .pixels, .value = value };
+    }
+
     pub const Kind = enum(u32) {
         children = 0,
         text = 1,

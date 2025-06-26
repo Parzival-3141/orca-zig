@@ -109,11 +109,11 @@ pub fn onFrameRefresh() !void {
         });
 
         ui.box("main panel")({
-            ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+            ui.styleSetSize(.width, .parent(1));
             ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1 });
 
             ui.box("background")({
-                ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+                ui.styleSetSize(.width, .parent(1));
                 ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1 });
                 ui.styleSetAxis(.x);
                 ui.styleSetF32(.margin_x, 16);
@@ -150,7 +150,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
     defer columnEnd();
 
     ui.box("top")({
-        ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+        ui.styleSetSize(.width, .parent(1));
         ui.styleSetAxis(.x);
         ui.styleSetF32(.spacing, 32);
 
@@ -196,8 +196,8 @@ fn widgets(arena: *oc.mem.Arena) !void {
         //---------------------------------------------------------------------------------
 
         ui.styleRule("v_slider")({
-            ui.styleSetSize(.width, .{ .kind = .pixels, .value = 24 });
-            ui.styleSetSize(.height, .{ .kind = .pixels, .value = 130 });
+            ui.styleSetSize(.width, .pixels(24));
+            ui.styleSetSize(.height, .pixels(130));
         });
 
         _ = ui.slider("v_slider", &v_slider_value);
@@ -243,8 +243,8 @@ fn widgets(arena: *oc.mem.Arena) !void {
             //-----------------------------------------------------------------------------
 
             ui.styleRule("h_slider")({
-                ui.styleSetSize(.width, .{ .kind = .pixels, .value = 130 });
-                ui.styleSetSize(.height, .{ .kind = .pixels, .value = 24 });
+                ui.styleSetSize(.width, .pixels(130));
+                ui.styleSetSize(.height, .pixels(24));
             });
             _ = ui.slider("h_slider", &h_slider_value);
 
@@ -261,7 +261,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
     //-------------------------------------------------------------------------------------
     {
         ui.styleRule("text")({
-            ui.styleSetSize(.width, .{ .kind = .pixels, .value = 305 });
+            ui.styleSetSize(.width, .pixels(305));
         });
 
         const result = ui.textBoxStr8(oc.toStr8("text"), arena, &text_info);
@@ -300,7 +300,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
     // Scrollable panel
     //-------------------------------------------------------------------------------------
     ui.box("log")({
-        ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+        ui.styleSetSize(.width, .parent(1));
         ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1, .minSize = 200 });
         ui.styleSetVar(.bg_color, "bg-2"); // @Api missing themes
         ui.styleSetVar(.border_color, "border"); // @Api missing themes
@@ -362,8 +362,8 @@ fn styling(arena: *oc.mem.Arena) void {
     defer columnEnd();
 
     ui.box("styled_radios")({
-        ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
-        ui.styleSetSize(.height, .{ .kind = .pixels, .value = 152 });
+        ui.styleSetSize(.width, .parent(1));
+        ui.styleSetSize(.height, .pixels(152));
         ui.styleSetColor(.bg_color, .{ .r = 0.086, .g = 0.086, .b = 0.102 });
         ui.styleSetVar(.roundness, "roundness-small"); // @Api missing themes
 
@@ -378,8 +378,8 @@ fn styling(arena: *oc.mem.Arena) void {
             const unselected_pattern = list.join(arena);
 
             ui.styleRule(unselected_pattern.toSlice())({
-                ui.styleSetSize(.width, .{ .kind = .pixels, .value = unselected_width });
-                ui.styleSetSize(.height, .{ .kind = .pixels, .value = unselected_height });
+                ui.styleSetSize(.width, .pixels(unselected_width));
+                ui.styleSetSize(.height, .pixels(unselected_height));
                 ui.styleSetColor(.bg_color, unselected_bg_color);
                 ui.styleSetColor(.border_color, unselected_border_color);
                 ui.styleSetF32(.border_size, unselected_border_size);
@@ -395,8 +395,8 @@ fn styling(arena: *oc.mem.Arena) void {
             const selected_pattern = list.join(arena);
 
             ui.styleRule(selected_pattern.toSlice())({
-                ui.styleSetSize(.width, .{ .kind = .pixels, .value = selected_width });
-                ui.styleSetSize(.height, .{ .kind = .pixels, .value = selected_height });
+                ui.styleSetSize(.width, .pixels(selected_width));
+                ui.styleSetSize(.height, .pixels(selected_height));
                 ui.styleSetColor(.bg_color, selected_bg_color);
                 ui.styleSetColor(.color, selected_center_color);
                 ui.styleSetF32(.roundness, selected_roundness);
@@ -546,7 +546,7 @@ fn styling(arena: *oc.mem.Arena) void {
             });
 
             ui.box("spacer")({
-                ui.styleSetSize(.height, .{ .kind = .pixels, .value = 24 });
+                ui.styleSetSize(.height, .pixels(24));
             });
 
             ui.box("status_override")({
@@ -588,7 +588,7 @@ fn styling(arena: *oc.mem.Arena) void {
                 ui.styleSetF32(.spacing, 8);
 
                 ui.styleRule("font-color")({
-                    ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
+                    ui.styleSetSize(.width, .pixels(100));
                 });
                 _ = ui.label("font-color", "Font color");
 
@@ -626,7 +626,7 @@ fn styling(arena: *oc.mem.Arena) void {
                 ui.styleSetF32(.spacing, 8);
 
                 ui.styleRule("font-label")({
-                    ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
+                    ui.styleSetSize(.width, .pixels(100));
                 });
                 _ = ui.label("font-label", "Font");
 
@@ -659,7 +659,7 @@ fn columnBegin(header: []const u8, widthFraction: f32) void {
     _ = ui.boxBeginStr8(oc.toStr8(header));
 
     ui.styleSetSize(.width, .{ .kind = .parent, .value = widthFraction, .relax = 1 });
-    ui.styleSetSize(.height, .{ .kind = .parent, .value = 1 });
+    ui.styleSetSize(.height, .parent(1));
     ui.styleSetAxis(.y);
     ui.styleSetF32(.margin_y, 8);
     ui.styleSetF32(.spacing, 24);
@@ -670,7 +670,7 @@ fn columnBegin(header: []const u8, widthFraction: f32) void {
     ui.styleSetI32(.constrain_y, 1);
 
     ui.box("header")({
-        ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+        ui.styleSetSize(.width, .parent(1));
         ui.styleSetAlign(.x, .center);
 
         ui.styleRule(".label")({
@@ -680,7 +680,7 @@ fn columnBegin(header: []const u8, widthFraction: f32) void {
     });
 
     _ = ui.boxBeginStr8(oc.toStr8("contents"));
-    ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
+    ui.styleSetSize(.width, .parent(1));
     ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1 });
     ui.styleSetAxis(.y);
     ui.styleSetAlign(.x, .start);
@@ -701,12 +701,12 @@ fn labeledSlider(label: []const u8, value: *f32) void {
     defer _ = ui.boxEnd();
 
     ui.styleRule("label")({
-        ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
+        ui.styleSetSize(.width, .pixels(100));
     });
     _ = ui.labelStr8(oc.toStr8("label"), s8_label);
 
     ui.styleRule("slider")({
-        ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
+        ui.styleSetSize(.width, .pixels(100));
     });
     _ = ui.slider("slider", value);
 }
