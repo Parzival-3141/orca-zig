@@ -148,7 +148,6 @@ fn callHandler(func: anytype, params: anytype, source: std.builtin.SourceLocatio
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            _ = writer; // autofix
             if (fmt.len != 0) std.fmt.invalidFmtError(fmt, self);
             _ = options;
 
@@ -162,6 +161,50 @@ fn callHandler(func: anytype, params: anytype, source: std.builtin.SourceLocatio
             // std.debug.writeStackTrace(self.inner.*, writer, debug_info, .no_color) catch |err| {
             //     try writer.print("Unable to print stack trace: {s}\n", .{@errorName(err)});
             // };
+
+            const stack_trace = self.inner;
+
+            // writeStackTrace()
+            if (@import("builtin").strip_debug_info) return;
+            var frame_index: usize = 0;
+            var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
+
+            while (frames_left != 0) : ({
+                frames_left -= 1;
+                frame_index = (frame_index + 1) % stack_trace.instruction_addresses.len;
+            }) {
+                const return_address = stack_trace.instruction_addresses[frame_index];
+                try printUnknownSource(writer, return_address - 1);
+            }
+
+            if (stack_trace.index > stack_trace.instruction_addresses.len) {
+                const dropped_frames = stack_trace.index - stack_trace.instruction_addresses.len;
+                try writer.print("({d} additional stack frames skipped...)\n", .{dropped_frames});
+            }
+        }
+
+        fn printUnknownSource(out_stream: anytype, address: usize) !void {
+            return printLineInfo(
+                out_stream,
+                address,
+                "???",
+                "???",
+            );
+        }
+
+        fn printLineInfo(
+            out_stream: anytype,
+            address: usize,
+            symbol_name: []const u8,
+            compile_unit_name: []const u8,
+        ) !void {
+            try out_stream.writeAll("???:?:?");
+            try out_stream.writeAll(": ");
+            try out_stream.print(
+                "0x{x} in {s} ({s})",
+                .{ address, symbol_name, compile_unit_name },
+            );
+            try out_stream.writeAll("\n");
         }
     };
 
@@ -174,16 +217,16 @@ fn callHandler(func: anytype, params: anytype, source: std.builtin.SourceLocatio
                 @branchHint(.unlikely);
                 // @Incomplete error return trace
 
-                var buf: [1024]u8 = undefined;
-                var fba = std.heap.FixedBufferAllocator.init(&buf);
+                // var buf: [1024]u8 = undefined;
+                // var fba = std.heap.FixedBufferAllocator.init(&buf);
 
-                const builtin = @import("builtin");
+                // const builtin = @import("builtin");
 
-                var dwf: std.debug.Dwarf = .{
-                    .is_macho = false,
-                    .endian = builtin.cpu.arch.endian(),
-                };
-                dwf.open(fba.allocator()) catch @panic("uh oh");
+                // var dwf: std.debug.Dwarf = .{
+                //     .is_macho = false,
+                //     .endian = builtin.cpu.arch.endian(),
+                // };
+                // dwf.open(fba.allocator()) catch @panic("uh oh");
 
                 // std.debug.StackIterator.init(first_address: ?usize, fp: ?usize)
 
