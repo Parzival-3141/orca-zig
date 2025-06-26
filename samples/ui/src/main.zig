@@ -91,43 +91,28 @@ pub fn onFrameRefresh() !void {
         //--------------------------------------------------------------------------------------------
         // Menu bar
         //--------------------------------------------------------------------------------------------
-        {
-            ui.menuBarBegin(@constCast("menu_bar"));
-            defer ui.menuBarEnd();
-
-            {
-                ui.menuBegin(@constCast("file-menu"), @constCast("File"));
-                defer ui.menuEnd();
-
+        ui.menuBar("menu_bar")({
+            ui.menu("file-menu", "File")({
                 if (ui.menuButton(@constCast("quit"), @constCast("Quit")).pressed) {
                     oc.app.requestQuit();
                 }
-            }
+            });
 
-            {
-                ui.menuBegin(@constCast("theme-menu"), @constCast("Theme"));
-                defer ui.menuEnd();
-
+            ui.menu("theme-menu", "Theme")({
                 if (ui.menuButton(@constCast("dark"), @constCast("Dark theme")).pressed) {
                     theme = .dark;
                 }
                 if (ui.menuButton(@constCast("light"), @constCast("Light theme")).pressed) {
                     theme = .light;
                 }
-            }
-        }
+            });
+        });
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("main panel"));
-            defer _ = ui.boxEnd();
-
+        ui.box("main panel")({
             ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
             ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1 });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("background"));
-                defer _ = ui.boxEnd();
-
+            ui.box("background")({
                 ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
                 ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1 });
                 ui.styleSetAxis(.x);
@@ -138,8 +123,8 @@ pub fn onFrameRefresh() !void {
                 try widgets(scratch.arena);
 
                 styling(scratch.arena);
-            }
-        }
+            });
+        });
     }
 
     _ = context.select();
@@ -164,18 +149,12 @@ fn widgets(arena: *oc.mem.Arena) !void {
     columnBegin("Widgets", 1.0 / 3.0);
     defer columnEnd();
 
-    {
-        _ = ui.boxBeginStr8(oc.toStr8("top"));
-        defer _ = ui.boxEnd();
-
+    ui.box("top")({
         ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
         ui.styleSetAxis(.x);
         ui.styleSetF32(.spacing, 32);
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("top_left"));
-            defer _ = ui.boxEnd();
-
+        ui.box("top_left")({
             ui.styleSetAxis(.y);
             ui.styleSetF32(.spacing, 24);
 
@@ -191,10 +170,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
                 logPush("Button clicked");
             }
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("checkbox"));
-                defer _ = ui.boxEnd();
-
+            ui.box("checkbox")({
                 ui.styleSetAxis(.x);
                 ui.styleSetAlign(.y, .center);
                 ui.styleSetF32(.spacing, 8);
@@ -212,19 +188,17 @@ fn widgets(arena: *oc.mem.Arena) !void {
                 }
 
                 _ = ui.label("label", "Checkbox");
-            }
-        }
+            });
+        });
 
         //---------------------------------------------------------------------------------
         // Vertical slider
         //---------------------------------------------------------------------------------
 
-        {
-            ui.styleRuleBegin(oc.toStr8("v_slider"));
-            defer ui.styleRuleEnd();
+        ui.styleRule("v_slider")({
             ui.styleSetSize(.width, .{ .kind = .pixels, .value = 24 });
             ui.styleSetSize(.height, .{ .kind = .pixels, .value = 130 });
-        }
+        });
 
         _ = ui.slider("v_slider", &v_slider_value);
 
@@ -235,10 +209,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
             v_slider_log_time = now;
         }
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("top right"));
-            defer _ = ui.boxEnd();
-
+        ui.box("top right")({
             ui.styleSetAxis(.y);
             ui.styleSetF32(.spacing, 24);
 
@@ -271,13 +242,10 @@ fn widgets(arena: *oc.mem.Arena) !void {
             // Horizontal slider
             //-----------------------------------------------------------------------------
 
-            {
-                ui.styleRuleBegin(oc.toStr8("h_slider"));
-                defer ui.styleRuleEnd();
-
+            ui.styleRule("h_slider")({
                 ui.styleSetSize(.width, .{ .kind = .pixels, .value = 130 });
                 ui.styleSetSize(.height, .{ .kind = .pixels, .value = 24 });
-            }
+            });
             _ = ui.slider("h_slider", &h_slider_value);
 
             if ((now - h_slider_log_time) >= 0.2 and h_slider_value != h_slider_logged_value) {
@@ -285,18 +253,16 @@ fn widgets(arena: *oc.mem.Arena) !void {
                 h_slider_logged_value = h_slider_value;
                 h_slider_log_time = now;
             }
-        }
-    }
+        });
+    });
 
     //-------------------------------------------------------------------------------------
     // Text box
     //-------------------------------------------------------------------------------------
     {
-        {
-            ui.styleRuleBegin(oc.toStr8("text"));
-            defer ui.styleRuleEnd();
+        ui.styleRule("text")({
             ui.styleSetSize(.width, .{ .kind = .pixels, .value = 305 });
-        }
+        });
 
         const result = ui.textBoxStr8(oc.toStr8("text"), arena, &text_info);
         if (result.changed) {
@@ -333,10 +299,7 @@ fn widgets(arena: *oc.mem.Arena) !void {
     //-------------------------------------------------------------------------------------
     // Scrollable panel
     //-------------------------------------------------------------------------------------
-    {
-        _ = ui.boxBeginStr8(oc.toStr8("log"));
-        defer _ = ui.boxEnd();
-
+    ui.box("log")({
         ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
         ui.styleSetSize(.height, .{ .kind = .parent, .value = 1, .relax = 1, .minSize = 200 });
         ui.styleSetVar(.bg_color, "bg-2"); // @Api missing themes
@@ -346,20 +309,15 @@ fn widgets(arena: *oc.mem.Arena) !void {
 
         ui.styleSetOverflow(.y, .scroll);
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("contents"));
-            defer _ = ui.boxEnd();
-
+        ui.box("contents")({
             ui.styleSetF32(.margin_x, 16);
             ui.styleSetF32(.margin_y, 16);
             ui.styleSetAxis(.y);
 
             if (log_lines.list.isEmpty()) {
-                {
-                    ui.styleRuleBegin(oc.toStr8("label"));
-                    defer ui.styleRuleEnd();
+                ui.styleRule("label")({
                     ui.styleSetVar(.color, "text-2"); // @Api missing themes
-                }
+                });
                 _ = ui.label("label", "Log");
             }
 
@@ -373,8 +331,8 @@ fn widgets(arena: *oc.mem.Arena) !void {
                     log_line.string,
                 );
             }
-        }
-    }
+        });
+    });
 }
 
 var styling_selected_radio: i32 = 0;
@@ -403,10 +361,7 @@ fn styling(arena: *oc.mem.Arena) void {
     columnBegin("Styling", 2.0 / 3.0);
     defer columnEnd();
 
-    {
-        _ = ui.boxBeginStr8(oc.toStr8("styled_radios"));
-        defer _ = ui.boxEnd();
-
+    ui.box("styled_radios")({
         ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
         ui.styleSetSize(.height, .{ .kind = .pixels, .value = 152 });
         ui.styleSetColor(.bg_color, .{ .r = 0.086, .g = 0.086, .b = 0.102 });
@@ -422,17 +377,14 @@ fn styling(arena: *oc.mem.Arena) void {
             list.push(arena, oc.toStr8(" .radio"));
             const unselected_pattern = list.join(arena);
 
-            {
-                ui.styleRuleBegin(unselected_pattern);
-                defer ui.styleRuleEnd();
-
+            ui.styleRule(unselected_pattern.toSlice())({
                 ui.styleSetSize(.width, .{ .kind = .pixels, .value = unselected_width });
                 ui.styleSetSize(.height, .{ .kind = .pixels, .value = unselected_height });
                 ui.styleSetColor(.bg_color, unselected_bg_color);
                 ui.styleSetColor(.border_color, unselected_border_color);
                 ui.styleSetF32(.border_size, unselected_border_size);
                 ui.styleSetF32(.roundness, unselected_roundness);
-            }
+            });
         }
 
         {
@@ -442,26 +394,20 @@ fn styling(arena: *oc.mem.Arena) void {
             list.push(arena, oc.toStr8(" .radio_selected"));
             const selected_pattern = list.join(arena);
 
-            {
-                ui.styleRuleBegin(selected_pattern);
-                defer ui.styleRuleEnd();
-
+            ui.styleRule(selected_pattern.toSlice())({
                 ui.styleSetSize(.width, .{ .kind = .pixels, .value = selected_width });
                 ui.styleSetSize(.height, .{ .kind = .pixels, .value = selected_height });
                 ui.styleSetColor(.bg_color, selected_bg_color);
                 ui.styleSetColor(.color, selected_center_color);
                 ui.styleSetF32(.roundness, selected_roundness);
-            }
+            });
         }
 
-        {
-            ui.styleRuleBegin(oc.toStr8("radio_group label"));
-            defer ui.styleRuleEnd();
-
+        ui.styleRule("radio_group label")({
             ui.styleSetColor(.color, label_font_color);
             ui.styleSetFont(.font, label_font.*);
             ui.styleSetF32(.font_size, label_font_size);
-        }
+        });
 
         var options = [_]oc.strings.Str8{
             oc.toStr8("I"),
@@ -475,34 +421,22 @@ fn styling(arena: *oc.mem.Arena) void {
         };
         const result = ui.radioGroup("radio_group", &radio_group_info);
         styling_selected_radio = result.selected_index;
-    }
+    });
 
-    {
-        _ = ui.boxBeginStr8(oc.toStr8("controls"));
-        defer _ = ui.boxEnd();
-
+    ui.box("controls")({
         ui.styleSetAxis(.x);
         ui.styleSetF32(.spacing, 32);
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("unselected"));
-            defer _ = ui.boxEnd();
-
+        ui.box("unselected")({
             ui.styleSetAxis(.y);
             ui.styleSetF32(.spacing, 16);
 
-            {
-                ui.styleRuleBegin(oc.toStr8("radio-label"));
-                defer ui.styleRuleEnd();
-
+            ui.styleRule("radio-label")({
                 ui.styleSetF32(.font_size, 16);
-            }
+            });
             _ = ui.label("radio-label", "Radio style");
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("size"));
-                defer _ = ui.boxEnd();
-
+            ui.box("size")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
 
@@ -517,40 +451,31 @@ fn styling(arena: *oc.mem.Arena) void {
                 var roundness_slider = (unselected_roundness - 4) / 8;
                 labeledSlider("Roundness", &roundness_slider);
                 unselected_roundness = 4 + roundness_slider * 8;
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("background"));
-                defer _ = ui.boxEnd();
-
+            ui.box("background")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
                 labeledSlider("Background R", &unselected_bg_color.r);
                 labeledSlider("Background G", &unselected_bg_color.g);
                 labeledSlider("Background B", &unselected_bg_color.b);
                 labeledSlider("Background A", &unselected_bg_color.a);
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("border"));
-                defer _ = ui.boxEnd();
-
+            ui.box("border")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
                 labeledSlider("Border R", &unselected_border_color.r);
                 labeledSlider("Border G", &unselected_border_color.g);
                 labeledSlider("Border B", &unselected_border_color.b);
                 labeledSlider("Border A", &unselected_border_color.a);
-            }
+            });
 
             var border_size_slider = unselected_border_size / 5;
             labeledSlider("Border size", &border_size_slider);
             unselected_border_size = border_size_slider * 5;
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("status_override"));
-                defer _ = ui.boxEnd();
-
+            ui.box("status_override")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 10);
                 _ = ui.label("label", "Override");
@@ -573,28 +498,19 @@ fn styling(arena: *oc.mem.Arena) void {
                     2 => oc.toStr8(".active"),
                     else => unreachable,
                 };
-            }
-        }
+            });
+        });
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("selected"));
-            defer _ = ui.boxEnd();
-
+        ui.box("selected")({
             ui.styleSetAxis(.y);
             ui.styleSetF32(.spacing, 16);
 
-            {
-                ui.styleRuleBegin(oc.toStr8("radio-label"));
-                defer ui.styleRuleEnd();
-
+            ui.styleRule("radio-label")({
                 ui.styleSetF32(.font_size, 16);
-            }
+            });
             _ = ui.label("radio-label", "Radio style");
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("size"));
-                defer _ = ui.boxEnd();
-
+            ui.box("size")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
 
@@ -609,43 +525,31 @@ fn styling(arena: *oc.mem.Arena) void {
                 var roundness_slider = (selected_roundness - 4) / 8;
                 labeledSlider("Roundness", &roundness_slider);
                 selected_roundness = 4 + roundness_slider * 8;
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("background"));
-                defer _ = ui.boxEnd();
-
+            ui.box("background")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
                 labeledSlider("Background R", &selected_bg_color.r);
                 labeledSlider("Background G", &selected_bg_color.g);
                 labeledSlider("Background B", &selected_bg_color.b);
                 labeledSlider("Background A", &selected_bg_color.a);
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("center"));
-                defer _ = ui.boxEnd();
-
+            ui.box("center")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 4);
                 labeledSlider("Center R", &selected_center_color.r);
                 labeledSlider("Center G", &selected_center_color.g);
                 labeledSlider("Center B", &selected_center_color.b);
                 labeledSlider("Center A", &selected_center_color.a);
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("spacer"));
-                defer _ = ui.boxEnd();
-
+            ui.box("spacer")({
                 ui.styleSetSize(.height, .{ .kind = .pixels, .value = 24 });
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("status_override"));
-                defer _ = ui.boxEnd();
-
+            ui.box("status_override")({
                 ui.styleSetAxis(.y);
                 ui.styleSetF32(.spacing, 10);
                 _ = ui.label("label", "Override");
@@ -668,36 +572,24 @@ fn styling(arena: *oc.mem.Arena) void {
                     2 => oc.toStr8(".active"),
                     else => unreachable,
                 };
-            }
-        }
+            });
+        });
 
-        {
-            _ = ui.boxBeginStr8(oc.toStr8("label"));
-            defer _ = ui.boxEnd();
-
+        ui.box("label")({
             ui.styleSetAxis(.y);
             ui.styleSetF32(.spacing, 16);
 
-            {
-                ui.styleRuleBegin(oc.toStr8("label-style"));
-                defer ui.styleRuleEnd();
-
+            ui.styleRule("label-style")({
                 ui.styleSetF32(.font_size, 16);
-            }
+            });
             _ = ui.label("label-style", "Label style");
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("font_color"));
-                defer _ = ui.boxEnd();
-
+            ui.box("font_color")({
                 ui.styleSetF32(.spacing, 8);
 
-                {
-                    ui.styleRuleBegin(oc.toStr8("font-color"));
-                    defer ui.styleRuleEnd();
-
+                ui.styleRule("font-color")({
                     ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
-                }
+                });
                 _ = ui.label("font-color", "Font color");
 
                 var color_names = [_]oc.strings.Str8{
@@ -728,20 +620,14 @@ fn styling(arena: *oc.mem.Arena) void {
                 const color_result = ui.selectPopup("color", &color_info);
                 label_font_color_selected = color_result.selected_index;
                 label_font_color = colors[@intCast(label_font_color_selected)];
-            }
+            });
 
-            {
-                _ = ui.boxBeginStr8(oc.toStr8("font"));
-                defer _ = ui.boxEnd();
-
+            ui.box("font")({
                 ui.styleSetF32(.spacing, 8);
 
-                {
-                    ui.styleRuleBegin(oc.toStr8("font-label"));
-                    defer ui.styleRuleEnd();
-
+                ui.styleRule("font-label")({
                     ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
-                }
+                });
                 _ = ui.label("font-label", "Font");
 
                 var font_names = [_]oc.strings.Str8{
@@ -760,13 +646,13 @@ fn styling(arena: *oc.mem.Arena) void {
                 const font_result = ui.selectPopup("font_style", &font_info);
                 label_font_selected = font_result.selected_index;
                 label_font = fonts[@intCast(label_font_selected)];
-            }
+            });
 
             var font_size_slider = (label_font_size - 8) / 16;
             labeledSlider("Font size", &font_size_slider);
             label_font_size = 8 + font_size_slider * 16;
-        }
-    }
+        });
+    });
 }
 
 fn columnBegin(header: []const u8, widthFraction: f32) void {
@@ -783,20 +669,15 @@ fn columnBegin(header: []const u8, widthFraction: f32) void {
     ui.styleSetVar(.roundness, "roundness-small"); // @Api missing themes
     ui.styleSetI32(.constrain_y, 1);
 
-    {
-        _ = ui.boxBeginStr8(oc.toStr8("header"));
-        defer _ = ui.boxEnd();
-
+    ui.box("header")({
         ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
         ui.styleSetAlign(.x, .center);
 
-        {
-            ui.styleRuleBegin(oc.toStr8(".label"));
-            defer ui.styleRuleEnd();
+        ui.styleRule(".label")({
             ui.styleSetF32(.font_size, 18);
-        }
+        });
         _ = ui.labelStr8(oc.toStr8("label"), oc.toStr8(header));
-    }
+    });
 
     _ = ui.boxBeginStr8(oc.toStr8("contents"));
     ui.styleSetSize(.width, .{ .kind = .parent, .value = 1 });
@@ -819,20 +700,14 @@ fn labeledSlider(label: []const u8, value: *f32) void {
     _ = ui.boxBeginStr8(s8_label);
     defer _ = ui.boxEnd();
 
-    {
-        ui.styleRuleBegin(oc.toStr8("label"));
-        defer ui.styleRuleEnd();
-
+    ui.styleRule("label")({
         ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
-    }
+    });
     _ = ui.labelStr8(oc.toStr8("label"), s8_label);
 
-    {
-        ui.styleRuleBegin(oc.toStr8("slider"));
-        defer ui.styleRuleEnd();
-
+    ui.styleRule("slider")({
         ui.styleSetSize(.width, .{ .kind = .pixels, .value = 100 });
-    }
+    });
     _ = ui.slider("slider", value);
 }
 

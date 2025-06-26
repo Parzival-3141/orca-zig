@@ -1,6 +1,7 @@
 //! Graphical User Interface API.
 
 const oc = @import("orca.zig");
+const InnerBlockFn = fn (void) callconv(.@"inline") void; // @Incomplete documentation
 
 // @Api UI namespace contents (not Core or Widgets) should be moved under the Application namespace
 // @Api missing documentation
@@ -413,7 +414,7 @@ pub const Box = extern struct {
 pub const contextCreate = oc_ui_context_create;
 extern fn oc_ui_context_create(
     defaultFont: oc.graphics.canvas.Font,
-) callconv(.C) ?*Context;
+) callconv(.C) ?*Context; // @Todo @Api are these actually optionals?
 
 pub const contextDestroy = oc_ui_context_destroy;
 extern fn oc_ui_context_destroy(
@@ -452,6 +453,16 @@ extern fn oc_ui_frame_arena() callconv(.C) [*c]oc.mem.Arena;
 
 pub const frameTime = oc_ui_frame_time;
 extern fn oc_ui_frame_time() callconv(.C) f64;
+
+pub inline fn box(string: []const u8) InnerBlockFn {
+    _ = boxBeginStr8(oc.toStr8(string));
+    const B = struct {
+        inline fn end(_: void) void {
+            _ = boxEnd();
+        }
+    };
+    return B.end;
+}
 
 pub const boxBeginStr8 = oc_ui_box_begin_str8;
 extern fn oc_ui_box_begin_str8(
@@ -565,6 +576,16 @@ pub const tagNextStr8 = oc_ui_tag_next_str8;
 extern fn oc_ui_tag_next_str8(
     string: oc.strings.Str8,
 ) callconv(.C) void;
+
+pub inline fn styleRule(pattern: []const u8) InnerBlockFn {
+    styleRuleBegin(oc.toStr8(pattern));
+    const S = struct {
+        inline fn end(_: void) void {
+            styleRuleEnd();
+        }
+    };
+    return S.end;
+}
 
 pub const styleRuleBegin = oc_ui_style_rule_begin;
 extern fn oc_ui_style_rule_begin(
@@ -900,6 +921,16 @@ extern fn oc_ui_tooltip_str8(
     text: oc.strings.Str8,
 ) callconv(.C) void;
 
+pub inline fn menuBar(key: []const u8) InnerBlockFn {
+    menuBarBegin(@ptrCast(@constCast(key)));
+    const M = struct {
+        inline fn barEnd(_: void) void {
+            menuBarEnd();
+        }
+    };
+    return M.barEnd;
+}
+
 pub const menuBarBegin = oc_ui_menu_bar_begin;
 extern fn oc_ui_menu_bar_begin(
     key: [*c]u8,
@@ -912,6 +943,16 @@ extern fn oc_ui_menu_bar_begin_str8(
 
 pub const menuBarEnd = oc_ui_menu_bar_end;
 extern fn oc_ui_menu_bar_end() callconv(.C) void;
+
+pub inline fn menu(key: []const u8, name: []const u8) InnerBlockFn {
+    menuBegin(@ptrCast(@constCast(key)), @ptrCast(@constCast(name)));
+    const M = struct {
+        inline fn end(_: void) void {
+            menuEnd();
+        }
+    };
+    return M.end;
+}
 
 pub const menuBegin = oc_ui_menu_begin;
 extern fn oc_ui_menu_begin(
